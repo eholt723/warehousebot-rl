@@ -1,0 +1,56 @@
+body {
+  background: #0b1020;
+  color: #e9ecff;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem;
+}
+
+h1 {
+  color: #91a6ff;
+  margin-bottom: 0.5rem;
+}
+
+main {
+  max-width: 960px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.controls, .shipment-input {
+  margin: 12px 0;
+}
+
+input {
+  background: #101633;
+  color: #e9ecff;
+  border: 1px solid #253066;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+button {
+  background: #2b3aa3;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  margin-left: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #3f52d1;
+}
+
+canvas {
+  margin-top: 16px;
+  background: radial-gradient(900px 600px at 50% 20%, #141a3c 0%, #0f1530 50%, #0b1020 100%);
+  border: 1px solid #20285a;
+  border-radius: 10px;
+}
