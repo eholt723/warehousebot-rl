@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Warehouse Picker Bot Demo</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -11,9 +11,13 @@
     <h1>Warehouse Picker Bot — Live Demo</h1>
 
     <section class="shipment-input">
-      <label for="items">Enter shipment items (comma separated):</label><br>
-      <input id="items" type="text" placeholder="ex: itemA,itemC,itemF" size="40">
-      <button id="submitItems">Update Shipment</button>
+      <h2>Please select what items are needed for the current shipment</h2>
+      <div id="itemsPanel" class="items-grid"><!-- checkboxes injected by JS --></div>
+      <div class="shipment-actions">
+        <button id="selectAllBtn" class="ghost">Select All</button>
+        <button id="clearAllBtn" class="ghost">Clear</button>
+        <button id="submitItems">Update Shipment</button>
+      </div>
     </section>
 
     <div class="controls">
