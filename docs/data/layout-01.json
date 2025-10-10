@@ -2,7 +2,6 @@
   "rows": 18,
   "cols": 30,
 
-  // Bot home / docking station (also used as start)
   "dock": [1, 1],
   "start": [1, 1],
 
