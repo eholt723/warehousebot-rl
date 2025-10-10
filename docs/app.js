@@ -102,7 +102,7 @@ function resetSim(){
 
 function run(){
   clearInterval(tickTimer);
-  const stepMs = 250; // bot speed (ms per step)
+  const stepMs = 250; // bot speed
   peopleTick = 0;
 
   tickTimer = setInterval(() => {
@@ -181,6 +181,11 @@ function spawnPeople(n){
     const r = randInt(0, layout.rows-1);
     const c = randInt(0, layout.cols-1);
     if (isBlockedByShelves(r,c)) continue;
+
+    // 🚫 Avoid item spaces
+    const onItem = Object.values(layout.items).some(([ir,ic]) => ir===r && ic===c);
+    if (onItem) continue;
+
     const [dr,dc] = layout.dock || layout.start || [0,0];
     if (r === dr && c === dc) continue;
     list.push({ pos: [r,c], dir: randChoice([[1,0],[-1,0],[0,1],[0,-1]]) });
@@ -194,10 +199,13 @@ function stepPeople(){
     let [dr, dc] = p.dir;
     if (Math.random() < 0.25) [dr, dc] = randChoice([[1,0],[-1,0],[0,1],[0,-1]]);
     let nr = r + dr, nc = c + dc;
-    if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || (nr===state.bot[0] && nc===state.bot[1])) {
+
+    // 🚫 Avoid shelves, items, and the bot
+    const onItem = Object.values(layout.items).some(([ir,ic]) => ir===nr && ic===nc);
+    if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem || (nr===state.bot[0] && nc===state.bot[1])) {
       [dr, dc] = [-dr, -dc];
       nr = r + dr; nc = c + dc;
-      if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc)) { nr = r; nc = c; }
+      if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem) { nr = r; nc = c; }
     }
     p.dir = [dr, dc];
     p.pos = [nr, nc];
@@ -210,11 +218,10 @@ function isBlockedByShelves(r,c){
 }
 
 // === SAFETY BUFFER ZONE ===
-// The bot avoids any cell occupied by or adjacent to a person
 function isBlocked(r,c){
   if (isBlockedByShelves(r,c)) return true;
 
-  // Block any cell within 1 of a person's position
+  // Bot avoids people and their 1-cell buffer
   for (const p of state.people){
     const [pr, pc] = p.pos;
     if (Math.abs(pr - r) <= 1 && Math.abs(pc - c) <= 1) return true;
