@@ -13,7 +13,7 @@ const statsEl      = document.getElementById("stats");
 let layout = null;
 let state  = null;
 let tickTimer = null;
-let peopleTick = 0;  // <-- track slower people updates
+let peopleTick = 0;  // half-speed tracker
 
 // ===== Boot =====
 (async function init(){
@@ -102,7 +102,8 @@ function resetSim(){
 
 function run(){
   clearInterval(tickTimer);
-  const stepMs = 250; // bot speed (every 250 ms)
+  const stepMs = 250; // bot speed (ms per step)
+  peopleTick = 0;
 
   tickTimer = setInterval(() => {
     // ---- 1) Move people at half speed ----
@@ -207,11 +208,20 @@ function stepPeople(){
 function isBlockedByShelves(r,c){
   return layout.obstacles.some(([or,oc]) => or === r && oc === c);
 }
+
+// === SAFETY BUFFER ZONE ===
+// The bot avoids any cell occupied by or adjacent to a person
 function isBlocked(r,c){
   if (isBlockedByShelves(r,c)) return true;
-  if (state.people.some(p => p.pos[0] === r && p.pos[1] === c)) return true;
+
+  // Block any cell within 1 of a person's position
+  for (const p of state.people){
+    const [pr, pc] = p.pos;
+    if (Math.abs(pr - r) <= 1 && Math.abs(pc - c) <= 1) return true;
+  }
   return false;
 }
+
 function inBounds(r,c){ return r >= 0 && r < layout.rows && c >= 0 && c < layout.cols; }
 function sameCell(a,b){ return a[0] === b[0] && a[1] === b[1]; }
 
