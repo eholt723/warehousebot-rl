@@ -13,6 +13,7 @@ const statsEl      = document.getElementById("stats");
 let layout = null;
 let state  = null;
 let tickTimer = null;
+let peopleTick = 0;  // <-- track slower people updates
 
 // ===== Boot =====
 (async function init(){
@@ -62,7 +63,7 @@ function attachControlHandlers(){
     state.picked = [];
     state.pathLen = 0;
     state.time = 0;
-    state.delivered = false;     // <-- reset delivered flag for new shipment
+    state.delivered = false;
     state.phase = "picking";
     draw();
     statsEl.textContent = `Shipment: ${selected.join(", ")} | Items left: ${state.orderCoords.length}`;
@@ -92,8 +93,8 @@ function resetSim(){
     people: spawnPeople(layout.people?.count ?? 6),
     time: 0,
     pathLen: 0,
-    delivered: true,   // nothing to deliver when idle
-    phase: "idle"      // idle -> picking -> drop -> return -> idle
+    delivered: true,
+    phase: "idle"
   };
   draw();
   statsEl.textContent = "Simulation idle (bot docked).";
@@ -101,29 +102,27 @@ function resetSim(){
 
 function run(){
   clearInterval(tickTimer);
-  const stepMs = 250; // slower
+  const stepMs = 250; // bot speed (every 250 ms)
 
   tickTimer = setInterval(() => {
-    // 1) People move
-    stepPeople();
+    // ---- 1) Move people at half speed ----
+    peopleTick++;
+    if (peopleTick % 2 === 0) stepPeople();
 
-    // 2) Choose target
+    // ---- 2) Determine target ----
     let target = null;
     if (state.orderCoords.length > 0) {
-      // still picking
       target = state.orderCoords[0];
       state.phase = "picking";
     } else if (!state.delivered && state.drop) {
-      // all items picked but not delivered yet → go to drop
       target = state.drop;
       state.phase = "drop";
     } else {
-      // delivered (or no items) → return to dock
       target = state.dock;
       state.phase = "return";
     }
 
-    // Stop if docked and nothing to do
+    // ---- 3) Stop if docked and done ----
     if (state.phase === "return" && sameCell(state.bot, state.dock) && state.delivered) {
       clearInterval(tickTimer);
       state.phase = "idle";
@@ -132,7 +131,7 @@ function run(){
       return;
     }
 
-    // 3) Step toward target with basic avoidance
+    // ---- 4) Move bot ----
     const [tr, tc] = target;
     const [r,  c ] = state.bot;
     let nr = r + Math.sign(tr - r);
@@ -141,36 +140,34 @@ function run(){
     if (!inBounds(nr,nc) || isBlocked(nr,nc)) {
       const alternatives = shuffle([[r, c+1], [r, c-1], [r+1, c], [r-1, c]]);
       const ok = alternatives.find(([rr,cc]) => inBounds(rr,cc) && !isBlocked(rr,cc));
-      if (ok) [nr,nc] = ok; else { nr = r; nc = c; } // stuck
+      if (ok) [nr,nc] = ok; else { nr = r; nc = c; }
     }
 
     if (nr !== r || nc !== c) state.pathLen += 1;
     state.bot = [nr, nc];
     state.time += 1;
 
-    // 4) Arrivals
+    // ---- 5) Arrivals ----
     if (nr === tr && nc === tc) {
       if (state.phase === "picking") {
         const label = state.orderLabels[0];
         state.picked.push({ coord: [tr, tc], label });
         state.orderCoords.shift();
         state.orderLabels.shift();
-        // if that was the last item, mark not-delivered so we head to drop
         if (state.orderCoords.length === 0) state.delivered = false;
       } else if (state.phase === "drop") {
-        // 🔧 Key fix: mark as delivered so we won't retarget the drop
         state.delivered = true;
-        // (we keep picked history for visualization)
       }
     }
 
-    // 5) Render + stats
+    // ---- 6) Draw + stats ----
     draw();
     const targetsLeft =
-      state.orderCoords.length +                      // remaining items
-      (!state.delivered ? 1 : 0) +                   // drop still needed
-      (!sameCell(state.bot, state.dock) ? 1 : 0);    // return leg
-    statsEl.textContent = `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Targets left: ${targetsLeft}`;
+      state.orderCoords.length +
+      (!state.delivered ? 1 : 0) +
+      (!sameCell(state.bot, state.dock) ? 1 : 0);
+    statsEl.textContent =
+      `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Targets left: ${targetsLeft}`;
   }, stepMs);
 }
 
