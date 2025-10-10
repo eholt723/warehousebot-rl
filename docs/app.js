@@ -17,13 +17,12 @@ let tickTimer = null;
 // ===== Boot =====
 (async function init(){
   try {
-    layout = await fetch("data/layout-01.json", { cache: "no-store" }).then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    });
+    const res = await fetch("data/layout-01.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    layout = await res.json();
   } catch (err) {
-    console.error(err);
-    alert("Error: couldn't load data/layout-01.json\n\nCheck that the file exists at docs/data/layout-01.json and is committed.");
+    console.error("Layout load error:", err);
+    alert(`Error loading layout-01.json: ${err.message}`);
     return;
   }
 
@@ -86,7 +85,8 @@ function attachControlHandlers(){
 function resetSim(){
   clearInterval(tickTimer);
   state = {
-    bot: layout.start ? [...layout.start] : [0,0],
+    dock: layout.dock ? [...layout.dock] : (layout.start ? [...layout.start] : [0,0]),
+    bot:  layout.start ? [...layout.start] : [0,0],
     orderLabels: [],
     orderCoords: [],
     picked: [],
@@ -94,73 +94,84 @@ function resetSim(){
     people: spawnPeople(layout.people?.count ?? 6),
     time: 0,
     pathLen: 0,
-    phase: "idle"
+    phase: "idle"         // idle -> picking -> drop -> return -> idle
   };
   draw();
-  statsEl.textContent = "Simulation idle.";
+  statsEl.textContent = "Simulation idle (bot docked).";
 }
 
 function run(){
   clearInterval(tickTimer);
-  const stepMs = 90;
+
+  // 🔉 Slowed down a bit (was ~90ms)
+  const stepMs = 150;
 
   tickTimer = setInterval(() => {
     // 1) Move people first (random walkers)
     stepPeople();
 
-    // 2) Determine target: next pick OR drop box
+    // 2) Determine target:
+    //    - If items remain: go pick
+    //    - Else if not at drop yet and there WAS a shipment: go drop
+    //    - Else: return to dock
     let target = null;
     if (state.orderCoords.length > 0) {
       target = state.orderCoords[0];
       state.phase = "picking";
-    } else if (state.drop) {
+    } else if (state.drop && !sameCell(state.bot, state.dock) && !sameCell(state.bot, state.drop) && state.picked.length > 0) {
       target = state.drop;
       state.phase = "drop";
     } else {
-      // No work left
+      target = state.dock;
+      state.phase = "return";
+    }
+
+    // If already docked and no work, stop
+    if (state.phase === "return" && sameCell(state.bot, state.dock)) {
       clearInterval(tickTimer);
-      state.phase = "done";
+      state.phase = "idle";
       draw();
-      statsEl.textContent = `Completed ✅ | Time: ${state.time} | Path length: ${state.pathLen}`;
+      statsEl.textContent = `Docked ✅ | Time: ${state.time} | Path length: ${state.pathLen}`;
       return;
     }
 
-    // 3) Bot takes one step toward target with crude avoidance
+    // 3) One step toward target with crude avoidance
     const [tr, tc] = target;
     const [r,  c ] = state.bot;
     let nr = r + Math.sign(tr - r);
     let nc = c + Math.sign(tc - c);
 
-    // If blocked (shelf or person) or out of bounds, try alternatives
     if (!inBounds(nr,nc) || isBlocked(nr,nc)) {
       const alternatives = shuffle([
         [r, c+1], [r, c-1], [r+1, c], [r-1, c]
       ]);
       const ok = alternatives.find(([rr,cc]) => inBounds(rr,cc) && !isBlocked(rr,cc));
-      if (ok) [nr,nc] = ok; else { nr = r; nc = c; } // stuck
+      if (ok) [nr,nc] = ok; else { nr = r; nc = c; }
     }
 
     if (nr !== r || nc !== c) state.pathLen += 1;
     state.bot = [nr, nc];
     state.time += 1;
 
-    // 4) Arrived at current target?
+    // 4) Arrived?
     if (nr === tr && nc === tc) {
       if (state.phase === "picking") {
-        // Mark picked
         const label = state.orderLabels[0];
         state.picked.push({ coord: [tr, tc], label });
         state.orderCoords.shift();
         state.orderLabels.shift();
       } else if (state.phase === "drop") {
-        state.phase = "done";
+        // after drop we will naturally target the dock on next tick
       }
     }
 
     // 5) Render + stats
     draw();
-    const left = state.orderCoords.length + (state.phase === "drop" ? 1 : 0);
-    statsEl.textContent = `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Targets left: ${left}`;
+    const targetsLeft =
+      state.orderCoords.length +
+      ((state.picked.length > 0 && !sameCell(state.bot, state.drop)) ? 1 : 0) + // drop still ahead
+      (!sameCell(state.bot, state.dock) ? 1 : 0);                                // return-to-dock
+    statsEl.textContent = `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Targets left: ${targetsLeft}`;
   }, stepMs);
 }
 
@@ -173,7 +184,9 @@ function spawnPeople(n){
     const r = randInt(0, layout.rows-1);
     const c = randInt(0, layout.cols-1);
     if (isBlockedByShelves(r,c)) continue;
-    if (layout.start && r === layout.start[0] && c === layout.start[1]) continue;
+    // keep clear of dock/start
+    const [dr,dc] = layout.dock || layout.start || [0,0];
+    if (r === dr && c === dc) continue;
     list.push({ pos: [r,c], dir: randChoice([[1,0],[-1,0],[0,1],[0,-1]]) });
   }
   return list;
@@ -184,13 +197,11 @@ function stepPeople(){
     let [r, c] = p.pos;
     let [dr, dc] = p.dir;
 
-    // Occasional random turn
     if (Math.random() < 0.25) [dr, dc] = randChoice([[1,0],[-1,0],[0,1],[0,-1]]);
 
     let nr = r + dr;
     let nc = c + dc;
 
-    // Bounce if blocked or out of bounds or would hit the bot
     if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || (nr===state.bot[0] && nc===state.bot[1])) {
       [dr, dc] = [-dr, -dc];
       nr = r + dr; nc = c + dc;
@@ -208,13 +219,11 @@ function isBlockedByShelves(r,c){
 }
 function isBlocked(r,c){
   if (isBlockedByShelves(r,c)) return true;
-  // persons block cells too
   if (state.people.some(p => p.pos[0] === r && p.pos[1] === c)) return true;
   return false;
 }
-function inBounds(r,c){
-  return r >= 0 && r < layout.rows && c >= 0 && c < layout.cols;
-}
+function inBounds(r,c){ return r >= 0 && r < layout.rows && c >= 0 && c < layout.cols; }
+function sameCell(a,b){ return a[0] === b[0] && a[1] === b[1]; }
 
 // ===== Drawing =====
 function draw(){
@@ -237,10 +246,17 @@ function draw(){
   layout.obstacles.forEach(([r,c]) => ctx.fillRect(c*cellW, r*cellH, cellW, cellH));
 
   // drop location (green square)
-  if (state.drop){
-    const [dr,dc] = state.drop;
+  if (layout.drop){
+    const [dr,dc] = layout.drop;
     ctx.fillStyle = "#00d36b";
     ctx.fillRect(dc*cellW, dr*cellH, cellW, cellH);
+  }
+
+  // docking station (cyan square)
+  if (layout.dock){
+    const [rr,cc] = layout.dock;
+    ctx.fillStyle = "#00c7c7";
+    ctx.fillRect(cc*cellW, rr*cellH, cellW, cellH);
   }
 
   // all items A–J (green circles with label)
@@ -271,11 +287,9 @@ function drawMarker(r, c, label, fill, textColor){
   const cellH = canvas.height / layout.rows;
   const rad = Math.min(cellW,cellH)/3.2;
 
-  // circle
   ctx.fillStyle = fill;
   drawCircle(c*cellW + cellW/2, r*cellH + cellH/2, rad);
 
-  // text
   ctx.fillStyle = textColor;
   ctx.font = `${Math.floor(rad*1.2)}px system-ui, sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";

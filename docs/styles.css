@@ -83,6 +83,7 @@ canvas {
 #legend .k.shelf { background: rgba(255,255,255,.25); }
 #legend .k.person { background: rgba(180,180,195,.8); }
 #legend .k.drop { background: #00d36b; }
+#legend .k.dock { background: #00c7c7; }
 
 .item-buttons {
   display: flex;

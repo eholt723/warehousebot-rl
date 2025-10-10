@@ -1,7 +1,11 @@
 {
   "rows": 18,
   "cols": 30,
+
+  // Bot home / docking station (also used as start)
+  "dock": [1, 1],
   "start": [1, 1],
+
   "obstacles": [
     [2, 6], [2, 7], [2, 8], [2, 9], [2, 10],
     [5, 4], [6, 4], [7, 4],
@@ -21,6 +25,7 @@
     "I": [5, 26],
     "J": [16, 6]
   },
+
   "drop": [1, 27],
   "people": { "count": 8 }
 }
