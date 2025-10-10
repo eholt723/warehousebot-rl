@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Warehouse Picker Bot Demo</title>
+  <title>Warehouse Picker Bot — Live Demo</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -12,10 +12,10 @@
 
     <section class="shipment-input">
       <h2>Please select what items are needed for the current shipment</h2>
-      <div id="itemsPanel" class="items-grid"><!-- checkboxes injected by JS --></div>
-      <div class="shipment-actions">
-        <button id="selectAllBtn" class="ghost">Select All</button>
-        <button id="clearAllBtn" class="ghost">Clear</button>
+      <div id="itemSelector" class="item-selector"><!-- checkboxes injected by JS --></div>
+      <div class="selector-actions">
+        <button id="selectAllBtn" title="Select all">Select All</button>
+        <button id="clearAllBtn" title="Clear selection">Clear</button>
         <button id="submitItems">Update Shipment</button>
       </div>
     </section>
@@ -26,8 +26,19 @@
       <span id="stats"></span>
     </div>
 
-    <canvas id="stage" width="900" height="600"></canvas>
+    <!-- NOTE: width/height ATTRIBUTES define the true drawing buffer size -->
+    <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
   </main>
+
+  <!-- Fixed legend bottom-right -->
+  <aside id="legend">
+    <div class="row"><span class="k bot"></span> Bot</div>
+    <div class="row"><span class="k item"></span> Items (A–J)</div>
+    <div class="row"><span class="k picked"></span> Picked</div>
+    <div class="row"><span class="k shelf"></span> Shelves / Obstacles</div>
+    <div class="row"><span class="k person"></span> People (random walkers)</div>
+    <div class="row"><span class="k drop"></span> Drop location (box)</div>
+  </aside>
 
   <script src="app.js"></script>
 </body>
