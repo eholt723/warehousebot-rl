@@ -83,3 +83,38 @@ canvas {
 #legend .k.shelf { background: rgba(255,255,255,.25); }
 #legend .k.person { background: rgba(180,180,195,.8); }
 #legend .k.drop { background: #00d36b; }
+
+.item-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.item-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 18px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #0d1430;
+  color: #e9ecff;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.item-btn:hover {
+  background: #1b245c;
+  transform: scale(1.05);
+}
+
+.item-btn.selected {
+  background: #3f52d1;
+  color: #fff;
+  border-color: #7a8aff;
+}
