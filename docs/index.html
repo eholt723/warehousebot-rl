@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Warehouse Picker Bot — Live Demo</title>
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* Hide old map controls if they still exist */
+    #mapSelect, #loadMapBtn, #mapStatus { display: none !important; }
+  </style>
 </head>
 <body>
   <main>
@@ -14,30 +18,22 @@
       <h2>Please select what items are needed for the current shipment</h2>
       <div id="itemButtons" class="item-buttons"><!-- buttons added by JS --></div>
       <div class="selector-actions">
-        <button id="selectAllBtn">Select All</button>
-        <button id="clearAllBtn">Clear</button>
-        <button id="submitItems">Update Shipment</button>
+        <button id="selectAllBtn" type="button">Select All</button>
+        <button id="clearAllBtn" type="button">Clear</button>
+        <button id="submitItems" type="button">Update Shipment</button>
       </div>
-    </section>
-    
-    <section style="margin:12px 0; background:#101633; border:1px solid #20285a; border-radius:10px; padding:10px;">
-      <label for="mapSelect" style="margin-right:8px;">Map:</label>
-      <select id="mapSelect" style="min-width:180px;"></select>
-      <button id="loadMapBtn" style="margin-left:8px;">Load Map</button>
-      <span id="mapStatus" style="margin-left:10px; opacity:.9;"></span>
     </section>
 
     <div class="controls">
-      <button id="startBtn">Start Simulation</button>
-      <button id="resetBtn">Reset</button>
+      <button id="startBtn" type="button">Start Simulation</button>
+      <button id="resetBtn" type="button">Reset</button>
       <span id="stats"></span>
     </div>
 
-    <!-- NOTE: width/height ATTRIBUTES define the true drawing buffer size -->
     <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
   </main>
 
-  <!-- Fixed legend bottom-right -->
+  <!-- Legend -->
   <aside id="legend">
     <div class="row"><span class="k bot"></span> Bot</div>
     <div class="row"><span class="k item"></span> Items (A–J)</div>
