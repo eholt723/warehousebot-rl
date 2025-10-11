@@ -372,5 +372,34 @@ function orderByNearestNeighbor(labels,itemMap,start){
   }
   return ordered;
 }
-function twoOptImprove(order,itemMap,start){
-  const path=[start,...order.map(k=>itemMap[k])],labels=order.slice();let
+function twoOptImprove(order, itemMap, start){
+  const path = [start, ...order.map(k => itemMap[k])];
+  const labels = order.slice();
+
+  let improved = true;
+  let guard = 0;
+  while (improved && guard < 40) {
+    guard++;
+    improved = false;
+    for (let i = 1; i < path.length - 2; i++){
+      for (let j = i + 1; j < path.length - 1; j++){
+        const a = path[i-1], b = path[i], c = path[j], d = path[j+1];
+        const cur = Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1])
+                  + Math.abs(c[0]-d[0]) + Math.abs(c[1]-d[1]);
+        const alt = Math.abs(a[0]-c[0]) + Math.abs(a[1]-c[1])
+                  + Math.abs(b[0]-d[0]) + Math.abs(b[1]-d[1]);
+        if (alt + 1e-4 < cur) {
+          // reverse the segment i..j in both path and labels (labels are offset by 1)
+          path.splice(i, j - i + 1, ...path.slice(i, j + 1).reverse());
+          labels.splice(i-1, j - (i-1), ...labels.slice(i-1, j).reverse());
+          improved = true;
+        }
+      }
+    }
+  }
+  return labels;
+}
+
+// ===================== Utils =====================
+function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+function randChoice(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
