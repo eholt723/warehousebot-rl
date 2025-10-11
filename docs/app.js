@@ -1,3 +1,9 @@
+// ===================== Config =====================
+const LAYOUT_FILES = ["layout-01.json", "layout-02.json", "layout-03.json"];
+const DEFAULT_PEOPLE = 10;
+const STEP_MS = 250;       // bot speed (ms/tick)
+const WAIT_MAX = 40;       // after this many blocked ticks, replan
+
 // ===================== DOM =====================
 const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
@@ -9,29 +15,35 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
-// Map picker UI (add <select id="mapSelect"></select> + <button id="loadMapBtn">Load Map</button> in index.html)
-const mapSelect    = document.getElementById("mapSelect");
-const loadMapBtn   = document.getElementById("loadMapBtn");
-
 // ===================== Global State =====================
 let layout = null;
 let state  = null;
 let tickTimer = null;
 let peopleTick = 0;        // people move half as often
-let currentPath = [];      // path = array of [r,c] steps
-
-// Waiting behavior: plan through people and wait until they clear
+let currentPath = [];      // array of [r,c]
 let waitTicks = 0;         // consecutive waiting ticks
-const WAIT_MAX = 40;       // optional cap (40*250ms ≈ 10s); bot prefers waiting over detours
+let lastLayoutName = null; // avoid immediate repeat
 
 // ===================== Boot =====================
 (async function init(){
-  await loadLayout("layout-01.json"); // default map
+  await loadRandomLayout();
   buildItemSelector(layout.items);
   attachControlHandlers();
-  attachMapHandlers();
   resetSim();
 })();
+
+// ===================== Layout loading =====================
+async function loadRandomLayout(){
+  // Try to avoid repeating the last map
+  let candidate = randChoice(LAYOUT_FILES);
+  if (lastLayoutName && LAYOUT_FILES.length > 1 && candidate === lastLayoutName) {
+    const others = LAYOUT_FILES.filter(n => n !== lastLayoutName);
+    candidate = randChoice(others);
+  }
+  await loadLayout(candidate);
+  lastLayoutName = candidate;
+  statsEl.textContent = `Map loaded: ${candidate}. Ready.`;
+}
 
 async function loadLayout(fileName){
   try {
@@ -42,29 +54,6 @@ async function loadLayout(fileName){
     console.error("Layout load error:", err);
     alert(`Error loading ${fileName}: ${err.message}`);
   }
-}
-
-// ===================== Map Picker =====================
-function attachMapHandlers(){
-  if (!mapSelect || !loadMapBtn) return;
-
-  if (mapSelect.children.length === 0) {
-    ["layout-01.json","layout-02.json","layout-03.json"].forEach(name => {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name.replace(".json","");
-      mapSelect.appendChild(opt);
-    });
-  }
-
-  loadMapBtn.addEventListener("click", async () => {
-    clearInterval(tickTimer);
-    const chosen = mapSelect.value;
-    await loadLayout(chosen);
-    buildItemSelector(layout.items);
-    resetSim();
-    statsEl.textContent = `Map loaded: ${chosen}. Ready.`;
-  });
 }
 
 // ===================== Item Buttons A–J =====================
@@ -82,6 +71,7 @@ function buildItemSelector(itemsObj) {
   });
 }
 
+// ===================== Controls =====================
 function attachControlHandlers(){
   selectAllBtn?.addEventListener("click", () => {
     document.querySelectorAll(".item-btn").forEach(b => b.classList.add("selected"));
@@ -90,7 +80,6 @@ function attachControlHandlers(){
     document.querySelectorAll(".item-btn").forEach(b => b.classList.remove("selected"));
   });
 
-  // User submits shipment — keep visible order; secretly optimize route
   submitBtn?.addEventListener("click", () => {
     const selected = Array.from(document.querySelectorAll(".item-btn.selected"))
       .map(b => b.dataset.item);
@@ -103,14 +92,14 @@ function attachControlHandlers(){
     // Keep what the user sees (don’t change)
     state.displayOrder = selected.slice();
 
-    // Hidden internal plan: NN + 2-opt polish from the dock
+    // Hidden internal plan: NN + 2-opt starting from the dock
     const nn = orderByNearestNeighbor(selected, layout.items, state.dock);
     const planned = twoOptImprove(nn, layout.items, state.dock);
 
     state.orderLabels = planned;
     state.orderCoords = planned.map(s => layout.items[s]);
 
-    // Reset run state
+    // Reset per-run state
     state.picked = [];
     state.pathLen = 0;
     state.time = 0;
@@ -131,27 +120,29 @@ function attachControlHandlers(){
     run();
   });
 
-  resetBtn?.addEventListener("click", resetSim);
+  resetBtn?.addEventListener("click", async () => {
+    clearInterval(tickTimer);
+    await loadRandomLayout();           // <— random map each reset
+    buildItemSelector(layout.items);
+    resetSim();
+  });
 }
 
 // ===================== Simulation =====================
 function resetSim(){
   clearInterval(tickTimer);
   state = {
-    // Always define a dock; fallback to start or [0,0]
     dock: layout.dock ? [...layout.dock] : (layout.start ? [...layout.start] : [0,0]),
-    // Spawn the bot at the docking station (requested behavior for layouts 2 & 3 as well)
     bot:  layout.dock ? [...layout.dock] : (layout.start ? [...layout.start] : [0,0]),
-
-    displayOrder: [],      // user-visible order
-    orderLabels: [],       // internal planned order
+    displayOrder: [],
+    orderLabels: [],
     orderCoords: [],
     picked: [],
     drop: layout.drop ? [...layout.drop] : null,
-    people: spawnPeople(layout.people?.count ?? 8),
+    people: spawnPeople(layout.people?.count ?? DEFAULT_PEOPLE),
     time: 0,
     pathLen: 0,
-    delivered: true,       // nothing to deliver until we pick something
+    delivered: true,  // nothing to deliver until items are picked
     phase: "idle"
   };
   peopleTick = 0;
@@ -163,7 +154,6 @@ function resetSim(){
 
 function run(){
   clearInterval(tickTimer);
-  const stepMs = 250; // bot speed
   peopleTick = 0;
   waitTicks = 0;
 
@@ -172,7 +162,7 @@ function run(){
     peopleTick++;
     if (peopleTick % 2 === 0) stepPeople();
 
-    // 2) Current target
+    // 2) Decide current target
     let target = null;
     if (state.orderCoords.length > 0) {
       target = state.orderCoords[0];
@@ -267,7 +257,7 @@ function run(){
       (!sameCell(state.bot, state.dock) ? 1 : 0);
     statsEl.textContent =
       `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Targets left: ${targetsLeft}`;
-  }, stepMs);
+  }, STEP_MS);
 }
 
 // ===================== People =====================
@@ -284,8 +274,8 @@ function spawnPeople(n){
     const onItem = Object.values(layout.items).some(([ir,ic]) => ir===r && ic===c);
     if (onItem) continue;
 
-    // Avoid dock/start and drop
-    const [dr,dc] = layout.dock || layout.start || [0,0];
+    // Avoid dock and drop
+    const [dr,dc] = layout.dock || [0,0];
     const drop = layout.drop || [-1,-1];
     if ((r === dr && c === dc) || (r === drop[0] && c === drop[1])) continue;
 
