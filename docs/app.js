@@ -106,6 +106,7 @@ function attachControlHandlers(){
     state.picked = [];
     state.pathLen = 0;
     state.time = 0;
+    state.safetyPauseTicks = 0; // <-- track safety pause time in ticks
     state.delivered = false;
     state.phase = "picking";
     currentPath = [];
@@ -145,7 +146,8 @@ function resetSim(){
     people: spawnPeople(layout.people?.count ?? DEFAULT_PEOPLE),
     time: 0,
     pathLen: 0,
-    delivered: true,  // nothing to deliver until items are picked
+    safetyPauseTicks: 0,    // <-- initialize safety pause counter
+    delivered: true,        // nothing to deliver until items are picked
     phase: "idle"
   };
   peopleTick = 0;
@@ -183,7 +185,9 @@ function run(){
       clearInterval(tickTimer);
       state.phase = "idle";
       draw();
-      statsEl.textContent = `Docked ✅ | Time: ${state.time} | Path length: ${state.pathLen}`;
+      const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
+      statsEl.textContent =
+        `Docked ✅ | Time: ${state.time} | Path length: ${state.pathLen} | Safety pause time: ${pauseSec}s`;
       return;
     }
 
@@ -216,9 +220,13 @@ function run(){
       if (humanBufferBlocks(stepR, stepC)) {
         waitTicks++;
         state.time += 1;
+        state.safetyPauseTicks += 1;   // <-- count this safety wait tick
         draw();
+        const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
         const waitMsg = WAIT_MAX ? ` (${Math.min(waitTicks, WAIT_MAX)}/${WAIT_MAX})` : "";
-        statsEl.textContent = `Waiting for clearance${waitMsg}… | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen}`;
+        statsEl.textContent =
+          `Waiting for clearance${waitMsg}… | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Safety pause: ${pauseSec}s`;
+        // Optional cap: after WAIT_MAX, replan to look for alternative through shelves
         if (WAIT_MAX && waitTicks >= WAIT_MAX) {
           currentPath = astarStatic([r, c], [tr, tc]);
           waitTicks = 0;
@@ -253,12 +261,13 @@ function run(){
 
     // 6) Draw + stats
     draw();
+    const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
     const targetsLeft =
       state.orderCoords.length +
       (!state.delivered ? 1 : 0) +
       (!sameCell(state.bot, state.dock) ? 1 : 0);
     statsEl.textContent =
-      `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Targets left: ${targetsLeft}`;
+      `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Safety pause: ${pauseSec}s | Targets left: ${targetsLeft}`;
   }, STEP_MS);
 }
 
@@ -307,9 +316,7 @@ function stepPeople(){
 }
 
 // ===================== Collision / Geometry =====================
-function isBlockedByShelves(r,c){
-  return layout.obstacles.some(([or,oc]) => or === r && oc === c);
-}
+function isBlockedByShelves(r,c){ return layout.obstacles.some(([or,oc]) => or === r && oc === c); }
 function humanBufferBlocks(r,c){
   for (const p of state.people){
     const [pr, pc] = p.pos;

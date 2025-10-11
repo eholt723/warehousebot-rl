@@ -6,11 +6,45 @@
   <title>Warehouse Picker Bot — Live Demo</title>
   <link rel="stylesheet" href="styles.css" />
   <style>
-    /* Hide old map controls if they still exist */
+    /* Hide any leftover map controls if older HTML is around */
     #mapSelect, #loadMapBtn, #mapStatus { display: none !important; }
+
+    /* Simple instructions in the upper-left */
+    #instructions {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(16, 22, 51, .9);
+      border: 1px solid #20285a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #e8ecff;
+      font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 320px;
+      z-index: 10;
+    }
+    #instructions h3 {
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #b9c3ff;
+    }
+    #instructions ol {
+      margin: 0;
+      padding-left: 18px;
+    }
   </style>
 </head>
 <body>
+  <div id="instructions" aria-label="How to use">
+    <h3>Quick Start</h3>
+    <ol>
+      <li>Select items for the shipment below.</li>
+      <li>Click <strong>Update Shipment</strong>.</li>
+      <li>Click <strong>Start Simulation</strong>.</li>
+    </ol>
+  </div>
+
   <main>
     <h1>Warehouse Picker Bot — Live Demo</h1>
 
@@ -30,10 +64,11 @@
       <span id="stats"></span>
     </div>
 
+    <!-- NOTE: width/height attributes define the true drawing buffer size -->
     <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
   </main>
 
-  <!-- Legend -->
+  <!-- Fixed legend bottom-right -->
   <aside id="legend">
     <div class="row"><span class="k bot"></span> Bot</div>
     <div class="row"><span class="k item"></span> Items (A–J)</div>
