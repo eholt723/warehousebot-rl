@@ -20,7 +20,7 @@ let tickTimer = null;
 let peopleTick = 0;        // people move half as often
 let currentPath = [];      // path = array of [r,c] steps
 
-// Waiting behavior: we plan through people and wait until they clear
+// Waiting behavior: plan through people and wait until they clear
 let waitTicks = 0;         // consecutive waiting ticks
 const WAIT_MAX = 40;       // optional cap (40*250ms ≈ 10s); bot prefers waiting over detours
 
@@ -104,8 +104,8 @@ function attachControlHandlers(){
     state.displayOrder = selected.slice();
 
     // Hidden internal plan: NN + 2-opt polish from the dock
-    const nn = orderByNearestNeighbor(selected, layout.items, layout.dock);
-    const planned = twoOptImprove(nn, layout.items, layout.dock);
+    const nn = orderByNearestNeighbor(selected, layout.items, state.dock);
+    const planned = twoOptImprove(nn, layout.items, state.dock);
 
     state.orderLabels = planned;
     state.orderCoords = planned.map(s => layout.items[s]);
@@ -138,8 +138,11 @@ function attachControlHandlers(){
 function resetSim(){
   clearInterval(tickTimer);
   state = {
+    // Always define a dock; fallback to start or [0,0]
     dock: layout.dock ? [...layout.dock] : (layout.start ? [...layout.start] : [0,0]),
-    bot:  layout.start ? [...layout.start] : [0,0],
+    // Spawn the bot at the docking station (requested behavior for layouts 2 & 3 as well)
+    bot:  layout.dock ? [...layout.dock] : (layout.start ? [...layout.start] : [0,0]),
+
     displayOrder: [],      // user-visible order
     orderLabels: [],       // internal planned order
     orderCoords: [],
@@ -281,9 +284,10 @@ function spawnPeople(n){
     const onItem = Object.values(layout.items).some(([ir,ic]) => ir===r && ic===c);
     if (onItem) continue;
 
-    // Avoid dock/start
+    // Avoid dock/start and drop
     const [dr,dc] = layout.dock || layout.start || [0,0];
-    if (r === dr && c === dc) continue;
+    const drop = layout.drop || [-1,-1];
+    if ((r === dr && c === dc) || (r === drop[0] && c === drop[1])) continue;
 
     list.push({ pos: [r,c], dir: randChoice([[1,0],[-1,0],[0,1],[0,-1]]) });
   }

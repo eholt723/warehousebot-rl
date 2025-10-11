@@ -2,6 +2,7 @@
   "rows": 18,
   "cols": 30,
   "dock": [16, 2],
+  "start": [16, 2],
   "drop": [1, 27],
   "people": { "count": 8 },
   "obstacles": [
