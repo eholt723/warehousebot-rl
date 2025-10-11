@@ -54,21 +54,37 @@ function attachControlHandlers(){
     document.querySelectorAll(".item-btn").forEach(b => b.classList.remove("selected"));
   });
 
+  // --- User submits shipment (we keep their visible order, but plan secretly) ---
   submitBtn.addEventListener("click", () => {
     const selected = Array.from(document.querySelectorAll(".item-btn.selected"))
       .map(b => b.dataset.item);
-    if (selected.length === 0) { alert("Select at least one item (A–J)."); return; }
 
-    state.orderLabels = selected.slice();
-    state.orderCoords = selected.map(s => layout.items[s]);
+    if (selected.length === 0) {
+      alert("Select at least one item (A–J).");
+      return;
+    }
+
+    // Keep what the user sees (do NOT change this order in UI):
+    state.displayOrder = selected.slice();
+
+    // Secret internal plan: nearest-neighbor order from the dock
+    const planned = orderByShortestPath(selected, layout.items, layout.dock);
+
+    // Navigation uses the planned order
+    state.orderLabels = planned;
+    state.orderCoords = planned.map(s => layout.items[s]);
+
+    // Reset run state
     state.picked = [];
     state.pathLen = 0;
     state.time = 0;
     state.delivered = false;
     state.phase = "picking";
     currentPath = [];
+
+    // Keep UI neutral—don’t reveal reordering
     draw();
-    statsEl.textContent = `Shipment: ${selected.join(", ")} | Items left: ${state.orderCoords.length}`;
+    statsEl.textContent = `Shipment ready. Items left: ${state.orderCoords.length}`;
   });
 
   startBtn.addEventListener("click", () => {
@@ -88,7 +104,8 @@ function resetSim(){
   state = {
     dock: layout.dock ? [...layout.dock] : (layout.start ? [...layout.start] : [0,0]),
     bot:  layout.start ? [...layout.start] : [0,0],
-    orderLabels: [],
+    displayOrder: [],      // user-visible order (unchanged)
+    orderLabels: [],       // internal planned order
     orderCoords: [],
     picked: [],
     drop: layout.drop ? [...layout.drop] : null,
@@ -373,6 +390,27 @@ function astar(start, goal) {
     }
   }
   return []; // no path (temporary blockage)
+}
+
+// ===== Route planning (hidden from user) =====
+function orderByShortestPath(labels, itemMap, start) {
+  const remaining = [...labels];
+  const ordered = [];
+  let current = start;
+
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const [r,c] = itemMap[remaining[i]];
+      const dist = Math.abs(current[0] - r) + Math.abs(current[1] - c);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+    const nextLabel = remaining.splice(bestIdx, 1)[0];
+    ordered.push(nextLabel);
+    current = itemMap[nextLabel];
+  }
+  return ordered;
 }
 
 // ===== utils =====
