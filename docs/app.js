@@ -1,4 +1,4 @@
-// ===== DOM =====
+// ===================== DOM =====================
 const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
 
@@ -9,24 +9,24 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
-// Map picker (add a <select id="mapSelect"> and <button id="loadMapBtn"> in your HTML near the top controls)
+// Map picker UI (add <select id="mapSelect"></select> + <button id="loadMapBtn">Load Map</button> in index.html)
 const mapSelect    = document.getElementById("mapSelect");
 const loadMapBtn   = document.getElementById("loadMapBtn");
 
-// ===== Global state =====
+// ===================== Global State =====================
 let layout = null;
 let state  = null;
 let tickTimer = null;
-let peopleTick = 0;        // people move half as often as the bot
-let currentPath = [];      // A* path cache (array of [r,c])
+let peopleTick = 0;        // people move half as often
+let currentPath = [];      // path = array of [r,c] steps
 
-// "Learned waiting/tempo" heuristic
-let waitTicks = 0;
-const WAIT_MAX = 3;        // up to N ticks to wait if the path is only human-blocked (tuneable)
+// Waiting behavior: we plan through people and wait until they clear
+let waitTicks = 0;         // consecutive waiting ticks
+const WAIT_MAX = 40;       // optional cap (40*250ms ≈ 10s); bot prefers waiting over detours
 
-// ===== Boot =====
+// ===================== Boot =====================
 (async function init(){
-  await loadLayout("layout-01.json"); // default
+  await loadLayout("layout-01.json"); // default map
   buildItemSelector(layout.items);
   attachControlHandlers();
   attachMapHandlers();
@@ -41,17 +41,15 @@ async function loadLayout(fileName){
   } catch (err) {
     console.error("Layout load error:", err);
     alert(`Error loading ${fileName}: ${err.message}`);
-    return;
   }
 }
 
-// ===== Map Picker =====
+// ===================== Map Picker =====================
 function attachMapHandlers(){
   if (!mapSelect || !loadMapBtn) return;
 
-  // Populate options if not present
   if (mapSelect.children.length === 0) {
-    ["layout-01.json", "layout-02.json", "layout-03.json"].forEach(name => {
+    ["layout-01.json","layout-02.json","layout-03.json"].forEach(name => {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name.replace(".json","");
@@ -69,7 +67,7 @@ function attachMapHandlers(){
   });
 }
 
-// ===== UI: letter buttons A–J =====
+// ===================== Item Buttons A–J =====================
 function buildItemSelector(itemsObj) {
   const container = document.getElementById("itemButtons");
   if (!container) return;
@@ -92,7 +90,7 @@ function attachControlHandlers(){
     document.querySelectorAll(".item-btn").forEach(b => b.classList.remove("selected"));
   });
 
-  // --- User submits shipment (keep visible order; plan secretly) ---
+  // User submits shipment — keep visible order; secretly optimize route
   submitBtn?.addEventListener("click", () => {
     const selected = Array.from(document.querySelectorAll(".item-btn.selected"))
       .map(b => b.dataset.item);
@@ -102,14 +100,13 @@ function attachControlHandlers(){
       return;
     }
 
-    // Keep what the user sees (do NOT change this order in UI):
+    // Keep what the user sees (don’t change)
     state.displayOrder = selected.slice();
 
-    // Secret internal plan: smarter sequencing (nearest-neighbor + 2-opt polish) from the dock
-    const nnOrder = orderByNearestNeighbor(selected, layout.items, layout.dock);
-    const planned = twoOptImprove(nnOrder, layout.items, layout.dock);
+    // Hidden internal plan: NN + 2-opt polish from the dock
+    const nn = orderByNearestNeighbor(selected, layout.items, layout.dock);
+    const planned = twoOptImprove(nn, layout.items, layout.dock);
 
-    // Navigation uses the planned order
     state.orderLabels = planned;
     state.orderCoords = planned.map(s => layout.items[s]);
 
@@ -122,7 +119,6 @@ function attachControlHandlers(){
     currentPath = [];
     waitTicks = 0;
 
-    // Keep UI neutral—don’t reveal reordering
     draw();
     statsEl.textContent = `Shipment ready. Items left: ${state.orderCoords.length}`;
   });
@@ -138,21 +134,21 @@ function attachControlHandlers(){
   resetBtn?.addEventListener("click", resetSim);
 }
 
-// ===== Simulation core =====
+// ===================== Simulation =====================
 function resetSim(){
   clearInterval(tickTimer);
   state = {
     dock: layout.dock ? [...layout.dock] : (layout.start ? [...layout.start] : [0,0]),
     bot:  layout.start ? [...layout.start] : [0,0],
-    displayOrder: [],      // user-visible order (unchanged)
+    displayOrder: [],      // user-visible order
     orderLabels: [],       // internal planned order
     orderCoords: [],
     picked: [],
     drop: layout.drop ? [...layout.drop] : null,
-    people: spawnPeople(layout.people?.count ?? 6),
+    people: spawnPeople(layout.people?.count ?? 8),
     time: 0,
     pathLen: 0,
-    delivered: true,
+    delivered: true,       // nothing to deliver until we pick something
     phase: "idle"
   };
   peopleTick = 0;
@@ -169,11 +165,11 @@ function run(){
   waitTicks = 0;
 
   tickTimer = setInterval(() => {
-    // ---- 1) Move people at half speed ----
+    // 1) People move at half speed
     peopleTick++;
     if (peopleTick % 2 === 0) stepPeople();
 
-    // ---- 2) Determine target ----
+    // 2) Current target
     let target = null;
     if (state.orderCoords.length > 0) {
       target = state.orderCoords[0];
@@ -186,7 +182,7 @@ function run(){
       state.phase = "return";
     }
 
-    // ---- 3) Stop if docked and done ----
+    // 3) Done & docked
     if (state.phase === "return" && sameCell(state.bot, state.dock) && state.delivered) {
       clearInterval(tickTimer);
       state.phase = "idle";
@@ -195,48 +191,47 @@ function run(){
       return;
     }
 
-    // ---- 4) Move bot via A* path + "tempo" waiting heuristic ----
+    // 4) Plan through people (ignore them), wait if next step is human-blocked
     const [tr, tc] = target;
     const [r,  c ] = state.bot;
 
-    // Plan if needed
-    const needReplan =
-      currentPath.length === 0 ||
-      !sameCell(currentPath.at(-1) || [-1,-1], [tr, tc]) ||
-      (currentPath.length && !inBounds(currentPath[0][0], currentPath[0][1])) ||
-      (currentPath.length && isBlocked(currentPath[0][0], currentPath[0][1]));
+    const targetChanged = !(currentPath.length && sameCell(currentPath.at(-1) || [-1,-1], [tr, tc]));
+    let mustReplan = currentPath.length === 0 || targetChanged;
 
-    if (needReplan) currentPath = astar([r,c], [tr,tc]);
-
-    let nr = r, nc = c;
-
-    // If next step is blocked by *people buffer* (not a shelf), "wait" up to WAIT_MAX ticks before replanning detours
-    if (currentPath.length > 0) {
-      const [sr, sc] = currentPath[0];
-      const blockedByShelf = isBlockedByShelves(sr, sc);
-      const blockedByHuman = !blockedByShelf && humanBufferBlocks(sr, sc);
-
-      if (blockedByHuman) {
-        if (waitTicks < WAIT_MAX) {
-          // Wait this tick (tempo behavior)
-          waitTicks++;
-          // time still advances, but bot doesn't move
-          state.time += 1;
-          draw();
-          statsEl.textContent = `Waiting for clearance… (${waitTicks}/${WAIT_MAX}) | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen}`;
-          return;
-        } else {
-          // Gave up waiting → replan (likely picks a detour)
-          currentPath = astar([r,c], [tr,tc]);
-          waitTicks = 0;
-        }
-      } else {
-        waitTicks = 0; // path is clear; reset timer
+    // Replan if next step is shelf-blocked/out-of-bounds
+    if (!mustReplan && currentPath.length > 0) {
+      const [nr0, nc0] = currentPath[0];
+      if (!inBounds(nr0, nc0) || isBlockedByShelves(nr0, nc0)) {
+        mustReplan = true;
       }
     }
 
-    // Step if we have a path; else wait
+    if (mustReplan) {
+      currentPath = astarStatic([r, c], [tr, tc]); // shelves-only A*
+      waitTicks = 0; // reset patience on new plan
+    }
+
+    let nr = r, nc = c;
+
     if (currentPath.length > 0) {
+      const [stepR, stepC] = currentPath[0];
+
+      // If a person (or 1-cell buffer) is on the next step, WAIT (don’t pop the step)
+      if (humanBufferBlocks(stepR, stepC)) {
+        waitTicks++;
+        state.time += 1;
+        draw();
+        const waitMsg = WAIT_MAX ? ` (${Math.min(waitTicks, WAIT_MAX)}/${WAIT_MAX})` : "";
+        statsEl.textContent = `Waiting for clearance${waitMsg}… | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen}`;
+        // Optional cap: after WAIT_MAX, replan to look for alternative through shelves
+        if (WAIT_MAX && waitTicks >= WAIT_MAX) {
+          currentPath = astarStatic([r, c], [tr, tc]);
+          waitTicks = 0;
+        }
+        return; // skip movement this tick
+      }
+
+      // Otherwise, advance one step along the planned path
       [nr, nc] = currentPath.shift();
     }
 
@@ -244,7 +239,7 @@ function run(){
     state.bot = [nr, nc];
     state.time += 1;
 
-    // ---- 5) Arrivals ----
+    // 5) Arrivals
     if (nr === tr && nc === tc) {
       if (state.phase === "picking") {
         const label = state.orderLabels[0];
@@ -261,7 +256,7 @@ function run(){
       }
     }
 
-    // ---- 6) Draw + stats ----
+    // 6) Draw + stats
     draw();
     const targetsLeft =
       state.orderCoords.length +
@@ -272,22 +267,24 @@ function run(){
   }, stepMs);
 }
 
-// ===== People (random walkers) =====
+// ===================== People =====================
 function spawnPeople(n){
   const list = [];
   let guard = 0;
-  while (list.length < n && guard < 2000) {
+  while (list.length < n && guard < 4000) {
     guard++;
     const r = randInt(0, layout.rows-1);
     const c = randInt(0, layout.cols-1);
     if (isBlockedByShelves(r,c)) continue;
 
-    // 🚫 Avoid item spaces
+    // Avoid item cells
     const onItem = Object.values(layout.items).some(([ir,ic]) => ir===r && ic===c);
     if (onItem) continue;
 
+    // Avoid dock/start
     const [dr,dc] = layout.dock || layout.start || [0,0];
     if (r === dr && c === dc) continue;
+
     list.push({ pos: [r,c], dir: randChoice([[1,0],[-1,0],[0,1],[0,-1]]) });
   }
   return list;
@@ -300,7 +297,7 @@ function stepPeople(){
     if (Math.random() < 0.25) [dr, dc] = randChoice([[1,0],[-1,0],[0,1],[0,-1]]);
     let nr = r + dr, nc = c + dc;
 
-    // 🚫 Avoid shelves, items, and the bot
+    // Avoid shelves, items, and the bot
     const onItem = Object.values(layout.items).some(([ir,ic]) => ir===nr && ic===nc);
     if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem || (nr===state.bot[0] && nc===state.bot[1])) {
       [dr, dc] = [-dr, -dc];
@@ -313,7 +310,7 @@ function stepPeople(){
   });
 }
 
-// ===== Collision helpers =====
+// ===================== Collision / Geometry =====================
 function isBlockedByShelves(r,c){
   return layout.obstacles.some(([or,oc]) => or === r && oc === c);
 }
@@ -326,15 +323,10 @@ function humanBufferBlocks(r,c){
   return false;
 }
 
-// Bot avoids shelves + 1-cell safety buffer around each person
-function isBlocked(r,c){
-  if (isBlockedByShelves(r,c)) return true;
-  return humanBufferBlocks(r,c);
-}
 function inBounds(r,c){ return r >= 0 && r < layout.rows && c >= 0 && c < layout.cols; }
 function sameCell(a,b){ return a[0] === b[0] && a[1] === b[1]; }
 
-// ===== Drawing =====
+// ===================== Drawing =====================
 function draw(){
   const cellW = canvas.width / layout.cols;
   const cellH = canvas.height / layout.rows;
@@ -400,72 +392,47 @@ function drawMarker(r, c, label, fill, textColor){
 
 function drawCircle(cx, cy, r){ ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill(); }
 
-// ===== A* pathfinding =====
-function manhattan(a, b) { return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]); }
+// ===================== Pathfinding =====================
+// A* that ignores people (treat people as temporary). Only shelves are hard obstacles.
+function astarStatic(start, goal) {
+  const blocked = new Set();
+  layout.obstacles.forEach(([r,c]) => blocked.add(`${r},${c}`));
 
-function buildBlockedSet() {
-  const b = new Set();
-  // shelves
-  layout.obstacles.forEach(([r,c]) => b.add(`${r},${c}`));
-  // safety buffer around people
-  state.people.forEach(p => {
-    const [pr,pc] = p.pos;
-    for (let dr=-1; dr<=1; dr++) for (let dc=-1; dc<=1; dc++) {
-      const rr = pr+dr, cc = pc+dc;
-      if (inBounds(rr,cc)) b.add(`${rr},${cc}`);
-    }
-  });
-  return b;
-}
-
-function astar(start, goal) {
-  const blocked = buildBlockedSet();
-  // If the goal is temporarily blocked (e.g., near a person), wait
-  if (blocked.has(`${goal[0]},${goal[1]}`)) return [];
-
-  const open = new Map(); // key -> {r,c,g,f,parent}
-  const closed = new Set();
   const key = (r,c) => `${r},${c}`;
+  const open = new Map();  // key -> node
+  const closed = new Set();
 
-  function push(node){ open.set(key(node.r,node.c), node); }
-  push({r:start[0], c:start[1], g:0, f:manhattan(start,goal), parent:null});
+  function h(a,b){ return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]); }
+  function push(n){ open.set(key(n.r,n.c), n); }
+
+  push({r:start[0], c:start[1], g:0, f:h(start,goal), parent:null});
 
   while (open.size) {
-    // get lowest f
-    let bestKey = null, bestF = Infinity, bestNode = null;
-    for (const [k,n] of open) if (n.f < bestF) { bestF = n.f; bestKey = k; bestNode = n; }
-    open.delete(bestKey);
-    closed.add(bestKey);
+    let bestK=null, bestF=Infinity, bestN=null;
+    for (const [k,n] of open) if (n.f < bestF) { bestF=n.f; bestK=k; bestN=n; }
+    open.delete(bestK);
+    closed.add(bestK);
 
-    if (bestNode.r === goal[0] && bestNode.c === goal[1]) {
-      // reconstruct path (excluding start)
-      const path = [];
-      let cur = bestNode;
-      while (cur.parent) {
-        path.push([cur.r, cur.c]);
-        cur = cur.parent;
-      }
-      path.reverse();
-      return path;
+    if (bestN.r===goal[0] && bestN.c===goal[1]) {
+      const path=[]; let cur=bestN;
+      while (cur.parent){ path.push([cur.r,cur.c]); cur=cur.parent; }
+      path.reverse(); return path;
     }
 
-    const cand = [[1,0],[-1,0],[0,1],[0,-1]];
-    for (const [dr,dc] of cand) {
-      const rr = bestNode.r+dr, cc = bestNode.c+dc;
-      const k = key(rr,cc);
+    for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const rr = bestN.r+dr, cc = bestN.c+dc, k = key(rr,cc);
       if (!inBounds(rr,cc)) continue;
       if (blocked.has(k)) continue;
       if (closed.has(k)) continue;
-      const g = bestNode.g + 1;
-      const f = g + manhattan([rr,cc], goal);
+      const g = bestN.g+1, f=g+h([rr,cc],goal);
       const prev = open.get(k);
-      if (!prev || g < prev.g) push({r:rr,c:cc,g,f,parent:bestNode});
+      if (!prev || g < prev.g) push({r:rr,c:cc,g,f,parent:bestN});
     }
   }
-  return []; // no path (temporary blockage)
+  return [];
 }
 
-// ===== Route planning (hidden from user) =====
+// ===================== Route planning (hidden from user) =====================
 function orderByNearestNeighbor(labels, itemMap, start) {
   const remaining = [...labels];
   const ordered = [];
@@ -486,12 +453,11 @@ function orderByNearestNeighbor(labels, itemMap, start) {
   return ordered;
 }
 
-// One-pass 2-opt improvement (fast polish)
+// Quick 2-opt improvement pass
 function twoOptImprove(order, itemMap, start){
   const path = [start, ...order.map(k => itemMap[k])];
   const labels = order.slice();
 
-  // try limited swaps
   let improved = true;
   let guard = 0;
   while (improved && guard < 40) {
@@ -500,10 +466,11 @@ function twoOptImprove(order, itemMap, start){
     for (let i = 1; i < path.length - 2; i++){
       for (let j = i + 1; j < path.length - 1; j++){
         const a = path[i-1], b = path[i], c = path[j], d = path[j+1];
-        const cur = manhattan(a,b) + manhattan(c,d);
-        const alt = manhattan(a,c) + manhattan(b,d);
+        const cur = Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1])
+                  + Math.abs(c[0]-d[0]) + Math.abs(c[1]-d[1]);
+        const alt = Math.abs(a[0]-c[0]) + Math.abs(a[1]-c[1])
+                  + Math.abs(b[0]-d[0]) + Math.abs(b[1]-d[1]);
         if (alt + 0.0001 < cur) {
-          // reverse segment [i..j]
           path.splice(i, j - i + 1, ...path.slice(i, j + 1).reverse());
           labels.splice(i-1, j - (i-1), ...labels.slice(i-1, j).reverse());
           improved = true;
@@ -514,7 +481,6 @@ function twoOptImprove(order, itemMap, start){
   return labels;
 }
 
-// ===== utils =====
+// ===================== Utils =====================
 function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
 function randChoice(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
-function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
