@@ -13,7 +13,8 @@ const statsEl      = document.getElementById("stats");
 let layout = null;
 let state  = null;
 let tickTimer = null;
-let peopleTick = 0;  // half-speed tracker
+let peopleTick = 0;        // people move half as often as the bot
+let currentPath = [];      // A* path cache (array of [r,c])
 
 // ===== Boot =====
 (async function init(){
@@ -65,6 +66,7 @@ function attachControlHandlers(){
     state.time = 0;
     state.delivered = false;
     state.phase = "picking";
+    currentPath = [];
     draw();
     statsEl.textContent = `Shipment: ${selected.join(", ")} | Items left: ${state.orderCoords.length}`;
   });
@@ -96,6 +98,8 @@ function resetSim(){
     delivered: true,
     phase: "idle"
   };
+  peopleTick = 0;
+  currentPath = [];
   draw();
   statsEl.textContent = "Simulation idle (bot docked).";
 }
@@ -132,16 +136,24 @@ function run(){
       return;
     }
 
-    // ---- 4) Move bot ----
+    // ---- 4) Move bot via A* path ----
     const [tr, tc] = target;
     const [r,  c ] = state.bot;
-    let nr = r + Math.sign(tr - r);
-    let nc = c + Math.sign(tc - c);
 
-    if (!inBounds(nr,nc) || isBlocked(nr,nc)) {
-      const alternatives = shuffle([[r, c+1], [r, c-1], [r+1, c], [r-1, c]]);
-      const ok = alternatives.find(([rr,cc]) => inBounds(rr,cc) && !isBlocked(rr,cc));
-      if (ok) [nr,nc] = ok; else { nr = r; nc = c; }
+    const needReplan =
+      currentPath.length === 0 ||
+      !sameCell(currentPath.at(-1) || [-1,-1], [tr, tc]) ||
+      (currentPath.length && !inBounds(currentPath[0][0], currentPath[0][1])) ||
+      (currentPath.length && isBlocked(currentPath[0][0], currentPath[0][1]));
+
+    if (needReplan) {
+      currentPath = astar([r,c], [tr,tc]);
+    }
+
+    // If no path (temporarily blocked), wait this tick
+    let nr = r, nc = c;
+    if (currentPath.length > 0) {
+      [nr, nc] = currentPath.shift();
     }
 
     if (nr !== r || nc !== c) state.pathLen += 1;
@@ -155,9 +167,11 @@ function run(){
         state.picked.push({ coord: [tr, tc], label });
         state.orderCoords.shift();
         state.orderLabels.shift();
+        currentPath = [];
         if (state.orderCoords.length === 0) state.delivered = false;
       } else if (state.phase === "drop") {
         state.delivered = true;
+        currentPath = [];
       }
     }
 
@@ -205,7 +219,8 @@ function stepPeople(){
     if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem || (nr===state.bot[0] && nc===state.bot[1])) {
       [dr, dc] = [-dr, -dc];
       nr = r + dr; nc = c + dc;
-      if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem) { nr = r; nc = c; }
+      const onItem2 = Object.values(layout.items).some(([ir,ic]) => ir===nr && ic===nc);
+      if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem2) { nr = r; nc = c; }
     }
     p.dir = [dr, dc];
     p.pos = [nr, nc];
@@ -217,18 +232,15 @@ function isBlockedByShelves(r,c){
   return layout.obstacles.some(([or,oc]) => or === r && oc === c);
 }
 
-// === SAFETY BUFFER ZONE ===
+// Bot avoids shelves + 1-cell safety buffer around each person
 function isBlocked(r,c){
   if (isBlockedByShelves(r,c)) return true;
-
-  // Bot avoids people and their 1-cell buffer
   for (const p of state.people){
     const [pr, pc] = p.pos;
     if (Math.abs(pr - r) <= 1 && Math.abs(pc - c) <= 1) return true;
   }
   return false;
 }
-
 function inBounds(r,c){ return r >= 0 && r < layout.rows && c >= 0 && c < layout.cols; }
 function sameCell(a,b){ return a[0] === b[0] && a[1] === b[1]; }
 
@@ -297,6 +309,71 @@ function drawMarker(r, c, label, fill, textColor){
 }
 
 function drawCircle(cx, cy, r){ ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill(); }
+
+// ===== A* pathfinding =====
+function manhattan(a, b) { return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]); }
+
+function buildBlockedSet() {
+  const b = new Set();
+  // shelves
+  layout.obstacles.forEach(([r,c]) => b.add(`${r},${c}`));
+  // safety buffer around people
+  state.people.forEach(p => {
+    const [pr,pc] = p.pos;
+    for (let dr=-1; dr<=1; dr++) for (let dc=-1; dc<=1; dc++) {
+      const rr = pr+dr, cc = pc+dc;
+      if (inBounds(rr,cc)) b.add(`${rr},${cc}`);
+    }
+  });
+  return b;
+}
+
+function astar(start, goal) {
+  const blocked = buildBlockedSet();
+  // If the goal is temporarily blocked (e.g., near a person), wait
+  if (blocked.has(`${goal[0]},${goal[1]}`)) return [];
+
+  const open = new Map(); // key -> {r,c,g,f,parent}
+  const closed = new Set();
+  const key = (r,c) => `${r},${c}`;
+
+  function push(node){ open.set(key(node.r,node.c), node); }
+  push({r:start[0], c:start[1], g:0, f:manhattan(start,goal), parent:null});
+
+  while (open.size) {
+    // get lowest f
+    let bestKey = null, bestF = Infinity, bestNode = null;
+    for (const [k,n] of open) if (n.f < bestF) { bestF = n.f; bestKey = k; bestNode = n; }
+    open.delete(bestKey);
+    closed.add(bestKey);
+
+    if (bestNode.r === goal[0] && bestNode.c === goal[1]) {
+      // reconstruct path (excluding start)
+      const path = [];
+      let cur = bestNode;
+      while (cur.parent) {
+        path.push([cur.r, cur.c]);
+        cur = cur.parent;
+      }
+      path.reverse();
+      return path;
+    }
+
+    const cand = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dr,dc] of cand) {
+      const rr = bestNode.r+dr, cc = bestNode.c+dc;
+      const k = key(rr,cc);
+      if (!inBounds(rr,cc)) continue;
+      if (blocked.has(k)) continue;
+      if (closed.has(k)) continue;
+      const g = bestNode.g + 1;
+      const f = g + manhattan([rr,cc], goal);
+      const prev = open.get(k);
+      if (!prev || g < prev.g) push({r:rr,c:cc,g,f,parent:bestNode});
+    }
+  }
+  return []; // no path (temporary blockage)
+}
 
 // ===== utils =====
 function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
