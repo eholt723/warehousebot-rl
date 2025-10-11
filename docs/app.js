@@ -9,6 +9,10 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
+// Map picker (add a <select id="mapSelect"> and <button id="loadMapBtn"> in your HTML near the top controls)
+const mapSelect    = document.getElementById("mapSelect");
+const loadMapBtn   = document.getElementById("loadMapBtn");
+
 // ===== Global state =====
 let layout = null;
 let state  = null;
@@ -16,25 +20,59 @@ let tickTimer = null;
 let peopleTick = 0;        // people move half as often as the bot
 let currentPath = [];      // A* path cache (array of [r,c])
 
+// "Learned waiting/tempo" heuristic
+let waitTicks = 0;
+const WAIT_MAX = 3;        // up to N ticks to wait if the path is only human-blocked (tuneable)
+
 // ===== Boot =====
 (async function init(){
+  await loadLayout("layout-01.json"); // default
+  buildItemSelector(layout.items);
+  attachControlHandlers();
+  attachMapHandlers();
+  resetSim();
+})();
+
+async function loadLayout(fileName){
   try {
-    const res = await fetch("data/layout-01.json", { cache: "no-store" });
+    const res = await fetch(`data/${fileName}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     layout = await res.json();
   } catch (err) {
     console.error("Layout load error:", err);
-    alert(`Error loading layout-01.json: ${err.message}`);
+    alert(`Error loading ${fileName}: ${err.message}`);
     return;
   }
-  buildItemSelector(layout.items);
-  attachControlHandlers();
-  resetSim();
-})();
+}
+
+// ===== Map Picker =====
+function attachMapHandlers(){
+  if (!mapSelect || !loadMapBtn) return;
+
+  // Populate options if not present
+  if (mapSelect.children.length === 0) {
+    ["layout-01.json", "layout-02.json", "layout-03.json"].forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name.replace(".json","");
+      mapSelect.appendChild(opt);
+    });
+  }
+
+  loadMapBtn.addEventListener("click", async () => {
+    clearInterval(tickTimer);
+    const chosen = mapSelect.value;
+    await loadLayout(chosen);
+    buildItemSelector(layout.items);
+    resetSim();
+    statsEl.textContent = `Map loaded: ${chosen}. Ready.`;
+  });
+}
 
 // ===== UI: letter buttons A–J =====
 function buildItemSelector(itemsObj) {
   const container = document.getElementById("itemButtons");
+  if (!container) return;
   container.innerHTML = "";
   Object.keys(itemsObj).sort().forEach(label => {
     const btn = document.createElement("button");
@@ -47,15 +85,15 @@ function buildItemSelector(itemsObj) {
 }
 
 function attachControlHandlers(){
-  selectAllBtn.addEventListener("click", () => {
+  selectAllBtn?.addEventListener("click", () => {
     document.querySelectorAll(".item-btn").forEach(b => b.classList.add("selected"));
   });
-  clearAllBtn.addEventListener("click", () => {
+  clearAllBtn?.addEventListener("click", () => {
     document.querySelectorAll(".item-btn").forEach(b => b.classList.remove("selected"));
   });
 
-  // --- User submits shipment (we keep their visible order, but plan secretly) ---
-  submitBtn.addEventListener("click", () => {
+  // --- User submits shipment (keep visible order; plan secretly) ---
+  submitBtn?.addEventListener("click", () => {
     const selected = Array.from(document.querySelectorAll(".item-btn.selected"))
       .map(b => b.dataset.item);
 
@@ -67,8 +105,9 @@ function attachControlHandlers(){
     // Keep what the user sees (do NOT change this order in UI):
     state.displayOrder = selected.slice();
 
-    // Secret internal plan: nearest-neighbor order from the dock
-    const planned = orderByShortestPath(selected, layout.items, layout.dock);
+    // Secret internal plan: smarter sequencing (nearest-neighbor + 2-opt polish) from the dock
+    const nnOrder = orderByNearestNeighbor(selected, layout.items, layout.dock);
+    const planned = twoOptImprove(nnOrder, layout.items, layout.dock);
 
     // Navigation uses the planned order
     state.orderLabels = planned;
@@ -81,13 +120,14 @@ function attachControlHandlers(){
     state.delivered = false;
     state.phase = "picking";
     currentPath = [];
+    waitTicks = 0;
 
     // Keep UI neutral—don’t reveal reordering
     draw();
     statsEl.textContent = `Shipment ready. Items left: ${state.orderCoords.length}`;
   });
 
-  startBtn.addEventListener("click", () => {
+  startBtn?.addEventListener("click", () => {
     if (!state.orderCoords || state.orderCoords.length === 0) {
       alert("Pick items first (Update Shipment).");
       return;
@@ -95,7 +135,7 @@ function attachControlHandlers(){
     run();
   });
 
-  resetBtn.addEventListener("click", resetSim);
+  resetBtn?.addEventListener("click", resetSim);
 }
 
 // ===== Simulation core =====
@@ -117,6 +157,7 @@ function resetSim(){
   };
   peopleTick = 0;
   currentPath = [];
+  waitTicks = 0;
   draw();
   statsEl.textContent = "Simulation idle (bot docked).";
 }
@@ -125,6 +166,7 @@ function run(){
   clearInterval(tickTimer);
   const stepMs = 250; // bot speed
   peopleTick = 0;
+  waitTicks = 0;
 
   tickTimer = setInterval(() => {
     // ---- 1) Move people at half speed ----
@@ -153,22 +195,47 @@ function run(){
       return;
     }
 
-    // ---- 4) Move bot via A* path ----
+    // ---- 4) Move bot via A* path + "tempo" waiting heuristic ----
     const [tr, tc] = target;
     const [r,  c ] = state.bot;
 
+    // Plan if needed
     const needReplan =
       currentPath.length === 0 ||
       !sameCell(currentPath.at(-1) || [-1,-1], [tr, tc]) ||
       (currentPath.length && !inBounds(currentPath[0][0], currentPath[0][1])) ||
       (currentPath.length && isBlocked(currentPath[0][0], currentPath[0][1]));
 
-    if (needReplan) {
-      currentPath = astar([r,c], [tr,tc]);
+    if (needReplan) currentPath = astar([r,c], [tr,tc]);
+
+    let nr = r, nc = c;
+
+    // If next step is blocked by *people buffer* (not a shelf), "wait" up to WAIT_MAX ticks before replanning detours
+    if (currentPath.length > 0) {
+      const [sr, sc] = currentPath[0];
+      const blockedByShelf = isBlockedByShelves(sr, sc);
+      const blockedByHuman = !blockedByShelf && humanBufferBlocks(sr, sc);
+
+      if (blockedByHuman) {
+        if (waitTicks < WAIT_MAX) {
+          // Wait this tick (tempo behavior)
+          waitTicks++;
+          // time still advances, but bot doesn't move
+          state.time += 1;
+          draw();
+          statsEl.textContent = `Waiting for clearance… (${waitTicks}/${WAIT_MAX}) | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen}`;
+          return;
+        } else {
+          // Gave up waiting → replan (likely picks a detour)
+          currentPath = astar([r,c], [tr,tc]);
+          waitTicks = 0;
+        }
+      } else {
+        waitTicks = 0; // path is clear; reset timer
+      }
     }
 
-    // If no path (temporarily blocked), wait this tick
-    let nr = r, nc = c;
+    // Step if we have a path; else wait
     if (currentPath.length > 0) {
       [nr, nc] = currentPath.shift();
     }
@@ -185,10 +252,12 @@ function run(){
         state.orderCoords.shift();
         state.orderLabels.shift();
         currentPath = [];
+        waitTicks = 0;
         if (state.orderCoords.length === 0) state.delivered = false;
       } else if (state.phase === "drop") {
         state.delivered = true;
         currentPath = [];
+        waitTicks = 0;
       }
     }
 
@@ -249,14 +318,18 @@ function isBlockedByShelves(r,c){
   return layout.obstacles.some(([or,oc]) => or === r && oc === c);
 }
 
-// Bot avoids shelves + 1-cell safety buffer around each person
-function isBlocked(r,c){
-  if (isBlockedByShelves(r,c)) return true;
+function humanBufferBlocks(r,c){
   for (const p of state.people){
     const [pr, pc] = p.pos;
     if (Math.abs(pr - r) <= 1 && Math.abs(pc - c) <= 1) return true;
   }
   return false;
+}
+
+// Bot avoids shelves + 1-cell safety buffer around each person
+function isBlocked(r,c){
+  if (isBlockedByShelves(r,c)) return true;
+  return humanBufferBlocks(r,c);
 }
 function inBounds(r,c){ return r >= 0 && r < layout.rows && c >= 0 && c < layout.cols; }
 function sameCell(a,b){ return a[0] === b[0] && a[1] === b[1]; }
@@ -393,7 +466,7 @@ function astar(start, goal) {
 }
 
 // ===== Route planning (hidden from user) =====
-function orderByShortestPath(labels, itemMap, start) {
+function orderByNearestNeighbor(labels, itemMap, start) {
   const remaining = [...labels];
   const ordered = [];
   let current = start;
@@ -411,6 +484,34 @@ function orderByShortestPath(labels, itemMap, start) {
     current = itemMap[nextLabel];
   }
   return ordered;
+}
+
+// One-pass 2-opt improvement (fast polish)
+function twoOptImprove(order, itemMap, start){
+  const path = [start, ...order.map(k => itemMap[k])];
+  const labels = order.slice();
+
+  // try limited swaps
+  let improved = true;
+  let guard = 0;
+  while (improved && guard < 40) {
+    guard++;
+    improved = false;
+    for (let i = 1; i < path.length - 2; i++){
+      for (let j = i + 1; j < path.length - 1; j++){
+        const a = path[i-1], b = path[i], c = path[j], d = path[j+1];
+        const cur = manhattan(a,b) + manhattan(c,d);
+        const alt = manhattan(a,c) + manhattan(b,d);
+        if (alt + 0.0001 < cur) {
+          // reverse segment [i..j]
+          path.splice(i, j - i + 1, ...path.slice(i, j + 1).reverse());
+          labels.splice(i-1, j - (i-1), ...labels.slice(i-1, j).reverse());
+          improved = true;
+        }
+      }
+    }
+  }
+  return labels;
 }
 
 // ===== utils =====
