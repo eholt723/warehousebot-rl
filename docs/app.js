@@ -216,7 +216,6 @@ function run(){
         draw();
         const waitMsg = WAIT_MAX ? ` (${Math.min(waitTicks, WAIT_MAX)}/${WAIT_MAX})` : "";
         statsEl.textContent = `Waiting for clearance${waitMsg}… | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen}`;
-        // Optional cap: after WAIT_MAX, replan to look for alternative through shelves
         if (WAIT_MAX && waitTicks >= WAIT_MAX) {
           currentPath = astarStatic([r, c], [tr, tc]);
           waitTicks = 0;
@@ -269,16 +268,11 @@ function spawnPeople(n){
     const r = randInt(0, layout.rows-1);
     const c = randInt(0, layout.cols-1);
     if (isBlockedByShelves(r,c)) continue;
-
-    // Avoid item cells
     const onItem = Object.values(layout.items).some(([ir,ic]) => ir===r && ic===c);
     if (onItem) continue;
-
-    // Avoid dock and drop
     const [dr,dc] = layout.dock || [0,0];
     const drop = layout.drop || [-1,-1];
     if ((r === dr && c === dc) || (r === drop[0] && c === drop[1])) continue;
-
     list.push({ pos: [r,c], dir: randChoice([[1,0],[-1,0],[0,1],[0,-1]]) });
   }
   return list;
@@ -290,8 +284,6 @@ function stepPeople(){
     let [dr, dc] = p.dir;
     if (Math.random() < 0.25) [dr, dc] = randChoice([[1,0],[-1,0],[0,1],[0,-1]]);
     let nr = r + dr, nc = c + dc;
-
-    // Avoid shelves, items, and the bot
     const onItem = Object.values(layout.items).some(([ir,ic]) => ir===nr && ic===nc);
     if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem || (nr===state.bot[0] && nc===state.bot[1])) {
       [dr, dc] = [-dr, -dc];
@@ -305,10 +297,7 @@ function stepPeople(){
 }
 
 // ===================== Collision / Geometry =====================
-function isBlockedByShelves(r,c){
-  return layout.obstacles.some(([or,oc]) => or === r && oc === c);
-}
-
+function isBlockedByShelves(r,c){ return layout.obstacles.some(([or,oc]) => or === r && oc === c); }
 function humanBufferBlocks(r,c){
   for (const p of state.people){
     const [pr, pc] = p.pos;
@@ -316,7 +305,6 @@ function humanBufferBlocks(r,c){
   }
   return false;
 }
-
 function inBounds(r,c){ return r >= 0 && r < layout.rows && c >= 0 && c < layout.cols; }
 function sameCell(a,b){ return a[0] === b[0] && a[1] === b[1]; }
 
@@ -325,156 +313,64 @@ function draw(){
   const cellW = canvas.width / layout.cols;
   const cellH = canvas.height / layout.rows;
   ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  // grid
   ctx.strokeStyle = "rgba(255,255,255,.05)";
   for (let r = 0; r <= layout.rows; r++){ ctx.beginPath(); ctx.moveTo(0, r*cellH); ctx.lineTo(canvas.width, r*cellH); ctx.stroke(); }
   for (let c = 0; c <= layout.cols; c++){ ctx.beginPath(); ctx.moveTo(c*cellW, 0); ctx.lineTo(c*cellW, canvas.height); ctx.stroke(); }
-
-  // shelves
   ctx.fillStyle = "rgba(255,255,255,.25)";
   layout.obstacles.forEach(([r,c]) => ctx.fillRect(c*cellW, r*cellH, cellW, cellH));
-
-  // drop (green)
-  if (layout.drop){
-    const [dr,dc] = layout.drop;
-    ctx.fillStyle = "#00d36b";
-    ctx.fillRect(dc*cellW, dr*cellH, cellW, cellH);
-  }
-
-  // dock (cyan)
-  if (layout.dock){
-    const [rr,cc] = layout.dock;
-    ctx.fillStyle = "#00c7c7";
-    ctx.fillRect(cc*cellW, rr*cellH, cellW, cellH);
-  }
-
-  // all items (green)
-  Object.entries(layout.items).forEach(([label,[r,c]]) => {
-    drawMarker(r, c, label, "rgba(0,200,0,.85)", "#0b1020");
-  });
-
-  // picked (gold)
-  state.picked.forEach(({coord:[r,c], label}) => {
-    drawMarker(r, c, label, "gold", "#1a1a1a");
-  });
-
-  // people (gray)
+  if (layout.drop){ const [dr,dc] = layout.drop; ctx.fillStyle = "#00d36b"; ctx.fillRect(dc*cellW, dr*cellH, cellW, cellH); }
+  if (layout.dock){ const [rr,cc] = layout.dock; ctx.fillStyle = "#00c7c7"; ctx.fillRect(cc*cellW, rr*cellH, cellW, cellH); }
+  Object.entries(layout.items).forEach(([label,[r,c]]) => drawMarker(r,c,label,"rgba(0,200,0,.85)","#0b1020"));
+  state.picked.forEach(({coord:[r,c],label}) => drawMarker(r,c,label,"gold","#1a1a1a"));
   ctx.fillStyle = "rgba(180,180,195,.9)";
-  state.people.forEach(p => {
-    const [r,c] = p.pos;
-    drawCircle(c*cellW + cellW/2, r*cellH + cellH/2, Math.min(cellW,cellH)/3.2);
-  });
-
-  // bot (blue)
-  const [br, bc] = state.bot;
-  ctx.fillStyle = "#00b3ff";
-  drawCircle(bc*cellW + cellW/2, br*cellH + cellH/2, Math.min(cellW,cellH)/2.8);
+  state.people.forEach(p => drawCircle(p.pos[1]*cellW+cellW/2,p.pos[0]*cellH+cellH/2,Math.min(cellW,cellH)/3.2));
+  const [br, bc] = state.bot; ctx.fillStyle = "#00b3ff";
+  drawCircle(bc*cellW+cellW/2,br*cellH+cellH/2,Math.min(cellW,cellH)/2.8);
 }
-
-function drawMarker(r, c, label, fill, textColor){
-  const cellW = canvas.width / layout.cols;
-  const cellH = canvas.height / layout.rows;
-  const rad = Math.min(cellW,cellH)/3.2;
-  ctx.fillStyle = fill;
-  drawCircle(c*cellW + cellW/2, r*cellH + cellH/2, rad);
-  ctx.fillStyle = textColor;
-  ctx.font = `${Math.floor(rad*1.2)}px system-ui, sans-serif`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(label, c*cellW + cellW/2, r*cellH + cellH/2);
+function drawMarker(r,c,label,fill,textColor){
+  const cellW=canvas.width/layout.cols,cellH=canvas.height/layout.rows,rad=Math.min(cellW,cellH)/3.2;
+  ctx.fillStyle=fill;drawCircle(c*cellW+cellW/2,r*cellH+cellH/2,rad);
+  ctx.fillStyle=textColor;ctx.font=`${Math.floor(rad*1.2)}px system-ui,sans-serif`;
+  ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(label,c*cellW+cellW/2,r*cellH+cellH/2);
 }
-
-function drawCircle(cx, cy, r){ ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill(); }
+function drawCircle(cx,cy,r){ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();}
 
 // ===================== Pathfinding =====================
-// A* that ignores people (treat people as temporary). Only shelves are hard obstacles.
-function astarStatic(start, goal) {
-  const blocked = new Set();
-  layout.obstacles.forEach(([r,c]) => blocked.add(`${r},${c}`));
-
-  const key = (r,c) => `${r},${c}`;
-  const open = new Map();  // key -> node
-  const closed = new Set();
-
-  function h(a,b){ return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]); }
-  function push(n){ open.set(key(n.r,n.c), n); }
-
-  push({r:start[0], c:start[1], g:0, f:h(start,goal), parent:null});
-
-  while (open.size) {
-    let bestK=null, bestF=Infinity, bestN=null;
-    for (const [k,n] of open) if (n.f < bestF) { bestF=n.f; bestK=k; bestN=n; }
-    open.delete(bestK);
-    closed.add(bestK);
-
-    if (bestN.r===goal[0] && bestN.c===goal[1]) {
-      const path=[]; let cur=bestN;
-      while (cur.parent){ path.push([cur.r,cur.c]); cur=cur.parent; }
-      path.reverse(); return path;
+function astarStatic(start,goal){
+  const blocked=new Set(layout.obstacles.map(([r,c])=>`${r},${c}`));
+  const key=(r,c)=>`${r},${c}`,open=new Map(),closed=new Set();
+  function h(a,b){return Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]);}
+  function push(n){open.set(key(n.r,n.c),n);}
+  push({r:start[0],c:start[1],g:0,f:h(start,goal),parent:null});
+  while(open.size){
+    let bestK=null,bestF=Infinity,bestN=null;
+    for(const[k,n]of open)if(n.f<bestF){bestF=n.f;bestK=k;bestN=n;}
+    open.delete(bestK);closed.add(bestK);
+    if(bestN.r===goal[0]&&bestN.c===goal[1]){
+      const path=[];let cur=bestN;while(cur.parent){path.push([cur.r,cur.c]);cur=cur.parent;}
+      path.reverse();return path;
     }
-
-    for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const rr = bestN.r+dr, cc = bestN.c+dc, k = key(rr,cc);
-      if (!inBounds(rr,cc)) continue;
-      if (blocked.has(k)) continue;
-      if (closed.has(k)) continue;
-      const g = bestN.g+1, f=g+h([rr,cc],goal);
-      const prev = open.get(k);
-      if (!prev || g < prev.g) push({r:rr,c:cc,g,f,parent:bestN});
+    for(const[dr,dc]of[[1,0],[-1,0],[0,1],[0,-1]]){
+      const rr=bestN.r+dr,cc=bestN.c+dc,k=key(rr,cc);
+      if(!inBounds(rr,cc)||blocked.has(k)||closed.has(k))continue;
+      const g=bestN.g+1,f=g+h([rr,cc],goal),prev=open.get(k);
+      if(!prev||g<prev.g)push({r:rr,c:cc,g,f,parent:bestN});
     }
-  }
-  return [];
+  }return[];
 }
 
-// ===================== Route planning (hidden from user) =====================
-function orderByNearestNeighbor(labels, itemMap, start) {
-  const remaining = [...labels];
-  const ordered = [];
-  let current = start;
-
-  while (remaining.length > 0) {
-    let bestIdx = 0;
-    let bestDist = Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const [r,c] = itemMap[remaining[i]];
-      const dist = Math.abs(current[0] - r) + Math.abs(current[1] - c);
-      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+// ===================== Route planning =====================
+function orderByNearestNeighbor(labels,itemMap,start){
+  const remaining=[...labels],ordered=[],cur=start;
+  while(remaining.length>0){
+    let bestIdx=0,bestDist=Infinity;
+    for(let i=0;i<remaining.length;i++){
+      const[r,c]=itemMap[remaining[i]],d=Math.abs(cur[0]-r)+Math.abs(cur[1]-c);
+      if(d<bestDist){bestDist=d;bestIdx=i;}
     }
-    const nextLabel = remaining.splice(bestIdx, 1)[0];
-    ordered.push(nextLabel);
-    current = itemMap[nextLabel];
+    const next=remaining.splice(bestIdx,1)[0];ordered.push(next);cur=itemMap[next];
   }
   return ordered;
 }
-
-// Quick 2-opt improvement pass
-function twoOptImprove(order, itemMap, start){
-  const path = [start, ...order.map(k => itemMap[k])];
-  const labels = order.slice();
-
-  let improved = true;
-  let guard = 0;
-  while (improved && guard < 40) {
-    guard++;
-    improved = false;
-    for (let i = 1; i < path.length - 2; i++){
-      for (let j = i + 1; j < path.length - 1; j++){
-        const a = path[i-1], b = path[i], c = path[j], d = path[j+1];
-        const cur = Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1])
-                  + Math.abs(c[0]-d[0]) + Math.abs(c[1]-d[1]);
-        const alt = Math.abs(a[0]-c[0]) + Math.abs(a[1]-c[1])
-                  + Math.abs(b[0]-d[0]) + Math.abs(b[1]-d[1]);
-        if (alt + 0.0001 < cur) {
-          path.splice(i, j - i + 1, ...path.slice(i, j + 1).reverse());
-          labels.splice(i-1, j - (i-1), ...labels.slice(i-1, j).reverse());
-          improved = true;
-        }
-      }
-    }
-  }
-  return labels;
-}
-
-// ===================== Utils =====================
-function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
-function randChoice(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function twoOptImprove(order,itemMap,start){
+  const path=[start,...order.map(k=>itemMap[k])],labels=order.slice();let
