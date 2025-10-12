@@ -4,6 +4,11 @@ const DEFAULT_PEOPLE = 10;
 const STEP_MS = 250;       // bot speed (ms/tick)
 const WAIT_MAX = 40;       // after this many blocked ticks, replan
 
+// --- RL Telemetry config (works even if training_ui.js is absent) ---
+const EPS_START = 1.0;
+const EPS_MIN   = 0.05;
+const EPS_DECAY = 0.99;
+
 // ===================== DOM =====================
 const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
@@ -15,6 +20,20 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
+// ===================== RL UI (optional) =====================
+const ui = window.WarehouseTrainingUI ? new window.WarehouseTrainingUI() : null;
+
+// Helpers to guard UI calls
+function uiLog(msg){ if (ui) ui.log(msg); }
+function uiSetEpisode(n){ if (ui) ui.setEpisode(n); }
+function uiSetEpsilon(e){ if (ui) ui.setEpsilon(e); }
+function uiSetSteps(s){ if (ui) ui.setLastSteps(s); }
+function uiRecordReward(r){ if (ui) ui.recordEpisodeReward(r); }
+
+// Epsilon pulls from UI persistence if present
+let epsilon = ui ? (ui.epsilon ?? EPS_START) : EPS_START;
+let nextEpisodeNumber = ui ? (ui.episode || 0) : 0;
+
 // ===================== Global State =====================
 let layout = null;
 let state  = null;
@@ -24,12 +43,16 @@ let currentPath = [];      // array of [r,c]
 let waitTicks = 0;         // consecutive waiting ticks
 let lastLayoutName = null; // avoid immediate repeat
 
+// Episode-scoped reward accumulator
+let episodeReward = 0;
+
 // ===================== Boot =====================
 (async function init(){
   await loadRandomLayout();
   buildItemSelector(layout.items);
   attachControlHandlers();
   resetSim();
+  uiLog("Initialized simulation.");
 })();
 
 // ===================== Layout loading =====================
@@ -43,6 +66,7 @@ async function loadRandomLayout(){
   await loadLayout(candidate);
   lastLayoutName = candidate;
   statsEl.textContent = `Map loaded: ${candidate}. Ready.`;
+  uiLog(`Map loaded: ${candidate}`);
 }
 
 async function loadLayout(fileName){
@@ -53,6 +77,7 @@ async function loadLayout(fileName){
   } catch (err) {
     console.error("Layout load error:", err);
     alert(`Error loading ${fileName}: ${err.message}`);
+    uiLog(`Error loading ${fileName}: ${err.message}`);
   }
 }
 
@@ -114,6 +139,7 @@ function attachControlHandlers(){
 
     draw();
     statsEl.textContent = `Shipment ready. Items left: ${state.orderCoords.length}`;
+    uiLog(`Shipment updated. Items: [${planned.join(", ")}]`);
   });
 
   startBtn?.addEventListener("click", () => {
@@ -153,14 +179,23 @@ function resetSim(){
   peopleTick = 0;
   currentPath = [];
   waitTicks = 0;
+  episodeReward = 0;
   draw();
   statsEl.textContent = "Simulation idle (bot docked).";
+  uiLog("Simulation reset (idle).");
 }
 
 function run(){
   clearInterval(tickTimer);
   peopleTick = 0;
   waitTicks = 0;
+  episodeReward = 0;
+
+  // === Episode start bookkeeping ===
+  const episodeNumber = ++nextEpisodeNumber;
+  uiSetEpisode(episodeNumber);
+  uiSetEpsilon(epsilon);
+  uiLog(`Episode ${episodeNumber} started (epsilon=${epsilon.toFixed(2)})`);
 
   tickTimer = setInterval(() => {
     // 1) People move at half speed
@@ -188,6 +223,19 @@ function run(){
       const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
       statsEl.textContent =
         `Docked ✅ | Time: ${state.time} | Path length: ${state.pathLen} | Safety pause time: ${pauseSec}s`;
+
+      // Reward for successful dock
+      episodeReward += 10;
+
+      // Episode end -> record metrics
+      uiSetSteps(state.pathLen);
+      uiRecordReward(episodeReward);
+      uiLog(`Episode ${episodeNumber} finished | reward=${episodeReward.toFixed(2)} | steps=${state.pathLen} | time=${state.time} | safetyPause=${pauseSec}s`);
+
+      // Epsilon decay & persist
+      epsilon = Math.max(EPS_MIN, epsilon * EPS_DECAY);
+      uiSetEpsilon(epsilon);
+
       return;
     }
 
@@ -209,6 +257,7 @@ function run(){
     if (mustReplan) {
       currentPath = astarStatic([r, c], [tr, tc]); // shelves-only A*
       waitTicks = 0; // reset patience on new plan
+      uiLog(`Replan: (${r},${c}) -> (${tr},${tc}) | pathLen=${currentPath.length}`);
     }
 
     let nr = r, nc = c;
@@ -221,15 +270,21 @@ function run(){
         waitTicks++;
         state.time += 1;
         state.safetyPauseTicks += 1;   // <-- count this safety wait tick
+
+        // Reward: penalize waiting lightly
+        episodeReward -= 0.5;
+
         draw();
         const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
         const waitMsg = WAIT_MAX ? ` (${Math.min(waitTicks, WAIT_MAX)}/${WAIT_MAX})` : "";
         statsEl.textContent =
           `Waiting for clearance${waitMsg}… | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Safety pause: ${pauseSec}s`;
+
         // Optional cap: after WAIT_MAX, replan to look for alternative through shelves
         if (WAIT_MAX && waitTicks >= WAIT_MAX) {
           currentPath = astarStatic([r, c], [tr, tc]);
           waitTicks = 0;
+          uiLog(`Patience cap hit → replan from (${r},${c})`);
         }
         return; // skip movement this tick
       }
@@ -238,7 +293,11 @@ function run(){
       [nr, nc] = currentPath.shift();
     }
 
-    if (nr !== r || nc !== c) state.pathLen += 1;
+    // Reward: step cost
+    if (nr !== r || nc !== c) {
+      state.pathLen += 1;
+      episodeReward -= 1;
+    }
     state.bot = [nr, nc];
     state.time += 1;
 
@@ -251,11 +310,23 @@ function run(){
         state.orderLabels.shift();
         currentPath = [];
         waitTicks = 0;
-        if (state.orderCoords.length === 0) state.delivered = false;
+
+        // Reward: picking success
+        episodeReward += 20;
+        uiLog(`Picked item ${label} at (${tr},${tc}). Items left: ${state.orderCoords.length}`);
+
+        if (state.orderCoords.length === 0) {
+          state.delivered = false;
+          uiLog("All items picked → heading to DROP.");
+        }
       } else if (state.phase === "drop") {
         state.delivered = true;
         currentPath = [];
         waitTicks = 0;
+
+        // Reward: successful drop
+        episodeReward += 30;
+        uiLog("Dropped items successfully → returning to DOCK.");
       }
     }
 
