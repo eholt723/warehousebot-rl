@@ -1,28 +1,49 @@
 // training_ui.js
-// Single compact RL window: persistent metrics + chart, and session-only logs.
-// Auto-initializes and exposes instance on window.__WarehouseUI for app.js to use.
+// Single compact panel: persisted topline + tiny chart + session console.
+// Also auto-positions above the legend.
 
-const LS_KEYS = {
+const LS = {
   EPISODE: "whbot_episode",
   EPSILON: "whbot_epsilon",
-  REWARD_HISTORY: "whbot_reward_history" // array of numbers
+  REWARD_HISTORY: "whbot_reward_history",   // number[]
+  STEPS_HISTORY: "whbot_steps_history"      // number[]
 };
 
 const AVG_WINDOW = 100;
-const MAX_HISTORY_POINTS = 1000;
+const MAX_POINTS = 1000;
 
 class WarehouseTrainingUI {
   constructor() {
-    // Bind DOM
-    this.elEpisode = document.getElementById("rl-episode");
-    this.elEpsilon = document.getElementById("rl-epsilon");
-    this.elAvgReward = document.getElementById("rl-avg-reward");
-    this.elSteps = document.getElementById("rl-steps");
+    // DOM
+    this.elTopline = document.getElementById("rl-topline");
     this.elLog = document.getElementById("rl-log-stream");
     this.elBody = document.getElementById("rl-body");
     this.btnCollapse = document.getElementById("rl-collapse");
+    this.panel = document.getElementById("rl-ui");
 
-    // Collapse handler
+    // Persistent state
+    this.episode = parseInt(localStorage.getItem(LS.EPISODE) || "0", 10);
+    this.epsilon = parseFloat(localStorage.getItem(LS.EPSILON) || "1.0");
+    this.rewards = this._loadArray(LS.REWARD_HISTORY);
+    this.stepsHistory = this._loadArray(LS.STEPS_HISTORY);
+
+    // Chart
+    const ctx = document.getElementById("rl-chart");
+    this.chart = new window.Chart(ctx, {
+      type: "line",
+      data: {
+        labels: this.rewards.map((_, i) => i + 1),
+        datasets: [{ label: "Reward", data: this.rewards, tension: 0.25, pointRadius: 0 }],
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { display: false }, y: { beginAtZero: false } }
+      },
+    });
+
+    // Collapse
     this.btnCollapse?.addEventListener("click", () => {
       const expanded = this.elBody.style.display !== "none";
       this.elBody.style.display = expanded ? "none" : "block";
@@ -30,70 +51,63 @@ class WarehouseTrainingUI {
       this.btnCollapse.textContent = expanded ? "Expand" : "Collapse";
     });
 
-    // Persistent state
-    this.episode = parseInt(localStorage.getItem(LS_KEYS.EPISODE) || "0", 10);
-    this.epsilon = parseFloat(localStorage.getItem(LS_KEYS.EPSILON) || "1.0");
-    this.rewardHistory = this._loadRewardHistory();
-
-    // Chart
-    const ctx = document.getElementById("rl-chart");
-    this.chart = new window.Chart(ctx, {
-      type: "line",
-      data: {
-        labels: this.rewardHistory.map((_, i) => i + 1),
-        datasets: [{ label: "Reward", data: this.rewardHistory, tension: 0.25, pointRadius: 0 }],
-      },
-      options: {
-        responsive: true,
-        animation: false,
-        plugins: { legend: { display: true } },
-        scales: { x: { display: false }, y: { beginAtZero: false } },
-      },
-    });
+    // Place above the legend
+    const place = () => {
+      const legend = document.getElementById("legend");
+      const lgH = legend ? legend.getBoundingClientRect().height : 160;
+      this.panel.style.bottom = `${16 + lgH + 12}px`;
+    };
+    place();
+    window.addEventListener("resize", place);
 
     // Session-only logs
     this.sessionLogs = [];
 
-    // Initial paint
-    this._render();
+    // Paint topline now
+    this._renderTopline();
   }
 
-  // === API used by app.js ===
+  // ========== API used from app.js ==========
   setEpisode(n) {
     this.episode = n;
-    localStorage.setItem(LS_KEYS.EPISODE, String(n));
-    this._renderEpisode();
+    localStorage.setItem(LS.EPISODE, String(n));
+    this._renderTopline();
   }
 
   setEpsilon(eps) {
     this.epsilon = eps;
-    localStorage.setItem(LS_KEYS.EPSILON, String(eps));
-    this._renderEpsilon();
+    localStorage.setItem(LS.EPSILON, String(eps));
+    this._renderTopline();
   }
 
   setLastSteps(steps) {
-    this.elSteps.textContent = String(steps);
+    // only session display uses steps granularly; topline uses history on episode end
+    // noop here
   }
 
   recordEpisodeReward(reward) {
-    this.rewardHistory.push(Number(reward));
-    if (this.rewardHistory.length > MAX_HISTORY_POINTS) {
-      this.rewardHistory.splice(0, this.rewardHistory.length - MAX_HISTORY_POINTS);
-    }
-    localStorage.setItem(LS_KEYS.REWARD_HISTORY, JSON.stringify(this.rewardHistory));
+    // called on EPISODE END — we’ll also expect caller to push the steps count via addStepsLastRun
+    this.rewards.push(Number(reward));
+    if (this.rewards.length > MAX_POINTS) this.rewards.splice(0, this.rewards.length - MAX_POINTS);
+    localStorage.setItem(LS.REWARD_HISTORY, JSON.stringify(this.rewards));
 
-    // Update chart
-    const idx = this.rewardHistory.length;
+    // chart
+    const idx = this.rewards.length;
     this.chart.data.labels.push(idx);
     this.chart.data.datasets[0].data.push(reward);
-    if (this.chart.data.labels.length > MAX_HISTORY_POINTS) {
+    if (this.chart.data.labels.length > MAX_POINTS) {
       this.chart.data.labels.shift();
       this.chart.data.datasets[0].data.shift();
     }
     this.chart.update();
+    this._renderTopline();
+  }
 
-    // Update rolling avg
-    this._renderAvgReward();
+  addStepsLastRun(steps) {
+    this.stepsHistory.push(Number(steps));
+    if (this.stepsHistory.length > MAX_POINTS) this.stepsHistory.splice(0, this.stepsHistory.length - MAX_POINTS);
+    localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(this.stepsHistory));
+    this._renderTopline();
   }
 
   log(message) {
@@ -107,39 +121,45 @@ class WarehouseTrainingUI {
     this.elLog.scrollTop = this.elLog.scrollHeight;
   }
 
-  // === internals ===
-  _render() {
-    this._renderEpisode();
-    this._renderEpsilon();
-    this._renderAvgReward();
-    this.setLastSteps(0);
-  }
-  _renderEpisode(){ this.elEpisode.textContent = String(this.episode); }
-  _renderEpsilon(){ this.elEpsilon.textContent = Number.isFinite(this.epsilon) ? this.epsilon.toFixed(2) : "1.00"; }
+  // ========== internals ==========
+  _renderTopline() {
+    const ep = this.episode;
 
-  _renderAvgReward() {
-    const windowed = this.rewardHistory.slice(-AVG_WINDOW);
-    const avg = windowed.length ? windowed.reduce((a,b) => a+b, 0) / windowed.length : 0;
-    this.elAvgReward.textContent = avg.toFixed(2);
-  }
+    // avg reward over last window
+    const win = this.rewards.slice(-AVG_WINDOW);
+    const avg = win.length ? (win.reduce((a,b)=>a+b,0) / win.length) : 0;
 
-  _loadRewardHistory() {
-    try {
-      const raw = localStorage.getItem(LS_KEYS.REWARD_HISTORY);
-      if (!raw) return [];
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.map(Number).slice(-MAX_HISTORY_POINTS) : [];
-    } catch {
-      return [];
+    // steps trend: last 3 values if present
+    const last3 = this.stepsHistory.slice(-3);
+    let trend = "";
+    if (last3.length === 3) {
+      const [a,b,c] = last3;
+      const improving = a > b && b > c;
+      trend = `${a} \u2192 ${b} \u2192 ${c}` + (improving ? " (improving)" : "");
+    } else if (last3.length > 0) {
+      trend = last3.join(" \u2192 ");
+    } else {
+      trend = "—";
     }
+
+    const epsStr = Number.isFinite(this.epsilon) ? this.epsilon.toFixed(2) : "1.00";
+    const avgStr = (avg >= 0 ? "+" : "") + avg.toFixed(1);
+
+    this.elTopline.textContent =
+      `Episode: ${ep} · Avg Reward: ${avgStr} · Steps per run: ${trend} · Epsilon: ${epsStr}`;
+  }
+
+  _loadArray(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const a = JSON.parse(raw);
+      return Array.isArray(a) ? a.map(Number).slice(-MAX_POINTS) : [];
+    } catch { return []; }
   }
 }
 
-// Auto-init once DOM is ready (Chart.js is already loaded in <head>)
-(function initUI(){
-  // If elements aren’t present, do nothing (keeps page resilient)
-  if (!document.getElementById("rl-ui")) return;
-  window.__WarehouseUI = new WarehouseTrainingUI();
-  // Also expose class for type checks in app.js if needed
-  window.WarehouseTrainingUI = WarehouseTrainingUI;
-})();
+// Singleton
+window.__WarehouseUI = window.__WarehouseUI || new WarehouseTrainingUI();
+// Leave the class available (app.js checks this symbol)
+window.WarehouseTrainingUI = WarehouseTrainingUI;

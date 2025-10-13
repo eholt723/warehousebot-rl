@@ -21,7 +21,7 @@ const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
 // ===================== RL UI (optional) =====================
-const ui = window.WarehouseTrainingUI ? new window.WarehouseTrainingUI() : null;
+const ui = window.__WarehouseUI || (window.WarehouseTrainingUI ? new window.WarehouseTrainingUI() : null);
 
 // Helpers to guard UI calls
 function uiLog(msg){ if (ui) ui.log(msg); }
@@ -230,6 +230,7 @@ function run(){
       // Episode end -> record metrics
       uiSetSteps(state.pathLen);
       uiRecordReward(episodeReward);
+      if (ui && typeof ui.addStepsLastRun === "function") ui.addStepsLastRun(state.pathLen);
       uiLog(`Episode ${episodeNumber} finished | reward=${episodeReward.toFixed(2)} | steps=${state.pathLen} | time=${state.time} | safetyPause=${pauseSec}s`);
 
       // Epsilon decay & persist

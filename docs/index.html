@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>WarehouseBot-RL</title>
   <link rel="stylesheet" href="styles.css" />
-
-  <!-- Chart.js for RL metrics -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
@@ -27,16 +25,8 @@
       max-width: 320px;
       z-index: 10;
     }
-    #instructions h3 {
-      margin: 0 0 6px 0;
-      font-size: 14px;
-      font-weight: 600;
-      color: #b9c3ff;
-    }
-    #instructions ol {
-      margin: 0;
-      padding-left: 18px;
-    }
+    #instructions h3 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; color: #b9c3ff; }
+    #instructions ol { margin: 0; padding-left: 18px; }
   </style>
 </head>
 
@@ -70,31 +60,27 @@
       <span id="stats"></span>
     </div>
 
-    <!-- Main simulation canvas -->
     <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
   </main>
 
-  <!-- === RL Telemetry (single window, no user buttons) ===
-       Placed ABOVE the legend by DOM order -->
-  <section id="rl-ui" class="rl-card">
+  <!-- === RL Telemetry: one compact panel, right side ABOVE legend === -->
+  <section id="rl-ui" class="rl-card rl-fixed">
     <header class="rl-card-header">
-      <h3>RL Training — Persistent Metrics & Live Session Log</h3>
+      <h3>RL Training</h3>
       <button id="rl-collapse" class="rl-btn" aria-expanded="true">Collapse</button>
     </header>
 
     <div id="rl-body" class="rl-card-body">
-      <!-- Metrics row (persistent) -->
-      <div class="rl-metrics-grid">
-        <div><div class="rl-label">Episode</div><div id="rl-episode" class="rl-value">0</div></div>
-        <div><div class="rl-label">Epsilon</div><div id="rl-epsilon" class="rl-value">1.00</div></div>
-        <div><div class="rl-label">Avg Reward (N=100)</div><div id="rl-avg-reward" class="rl-value">0.00</div></div>
-        <div><div class="rl-label">Steps (last)</div><div id="rl-steps" class="rl-value">0</div></div>
+      <!-- Top row: PERSISTED metrics (from localStorage) -->
+      <div id="rl-topline" class="rl-topline">
+        <!-- Filled by JS, e.g.:
+             Episode: 237 · Avg Reward: +23.4 · Steps per run: 68 → 45 → 31 (improving) · Epsilon: 0.22 -->
       </div>
 
-      <!-- Reward chart (persistent) -->
-      <canvas id="rl-chart" height="160"></canvas>
+      <!-- Small reward chart for persisted history -->
+      <canvas id="rl-chart" height="100"></canvas>
 
-      <!-- Session-only logs -->
+      <!-- Session-only console (clears on refresh) -->
       <div id="rl-log-stream" class="rl-log-stream" aria-live="polite"></div>
     </div>
   </section>
@@ -110,7 +96,7 @@
     <div class="row"><span class="k dock"></span> Docking station</div>
   </aside>
 
-  <!-- IMPORTANT: Load the UI module BEFORE app.js -->
+  <!-- IMPORTANT: load UI first so app.js can talk to it -->
   <script type="module" src="./training_ui.js"></script>
   <script src="app.js"></script>
 </body>
