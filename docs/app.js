@@ -4,10 +4,16 @@ const DEFAULT_PEOPLE = 10;
 const STEP_MS = 250;       // bot speed (ms/tick)
 const WAIT_MAX = 40;       // after this many blocked ticks, replan
 
-// --- RL Telemetry config (works even if training_ui.js is absent) ---
+// --- RL Telemetry config ---
 const EPS_START = 1.0;
 const EPS_MIN   = 0.05;
 const EPS_DECAY = 0.99;
+
+// LocalStorage keys (match the inline UI script)
+const LS_KEYS = {
+  EPISODE: "whbot_episode",
+  EPSILON: "whbot_epsilon"
+};
 
 // ===================== DOM =====================
 const canvas = document.getElementById("stage");
@@ -30,9 +36,15 @@ function uiSetEpsilon(e){ if (ui && ui.setEpsilon) ui.setEpsilon(e); }
 function uiSetSteps(s){ if (ui && ui.setLastSteps) ui.setLastSteps(s); }
 function uiRecordReward(r){ if (ui && ui.recordEpisodeReward) ui.recordEpisodeReward(r); }
 
-// Epsilon pulls from UI persistence if present
-let epsilon = ui ? (ui.epsilon ?? EPS_START) : EPS_START;
-let nextEpisodeNumber = ui ? (ui.episode || 0) : 0;
+// Pull seeds from localStorage (persistent), fall back to defaults
+let epsilon = (() => {
+  const v = parseFloat(localStorage.getItem(LS_KEYS.EPSILON));
+  return Number.isFinite(v) ? v : EPS_START;
+})();
+let nextEpisodeNumber = (() => {
+  const n = parseInt(localStorage.getItem(LS_KEYS.EPISODE) || "0", 10);
+  return Number.isFinite(n) ? n : 0;
+})();
 
 // ===================== Global State =====================
 let layout = null;
@@ -233,9 +245,13 @@ function run(){
       uiRecordReward(episodeReward);
       uiLog(`Episode ${episodeNumber} finished | reward=${episodeReward.toFixed(2)} | steps=${state.pathLen} | time=${state.time} | safetyPause=${pauseSec}s`);
 
-      // Epsilon decay & persist
+      // Epsilon decay & persist (also update LS directly so next load seeds correctly)
       epsilon = Math.max(EPS_MIN, epsilon * EPS_DECAY);
       uiSetEpsilon(epsilon);
+      try { localStorage.setItem(LS_KEYS.EPSILON, String(epsilon)); } catch {}
+
+      // Persist the latest episode number as well
+      try { localStorage.setItem(LS_KEYS.EPISODE, String(episodeNumber)); } catch {}
 
       return;
     }
