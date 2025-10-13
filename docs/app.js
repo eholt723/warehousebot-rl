@@ -229,8 +229,8 @@ function run(){
 
       // Episode end -> record metrics
       uiSetSteps(state.pathLen);
-      uiRecordReward(episodeReward);
       if (ui && typeof ui.addStepsLastRun === "function") ui.addStepsLastRun(state.pathLen);
+      uiRecordReward(episodeReward);
       uiLog(`Episode ${episodeNumber} finished | reward=${episodeReward.toFixed(2)} | steps=${state.pathLen} | time=${state.time} | safetyPause=${pauseSec}s`);
 
       // Epsilon decay & persist
