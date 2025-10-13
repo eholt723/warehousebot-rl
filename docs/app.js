@@ -15,6 +15,18 @@ const LS_KEYS = {
   EPSILON: "whbot_epsilon"
 };
 
+// --- Repo-backed global stats (EDIT THESE) ---
+const OWNER = "eholt723";
+const REPO  = "warehousebot-rl";
+const BRANCH = "main";
+const STATS_PATH = "stats.json"; // or "docs/stats.json" if you serve from /docs
+
+// 👇 Use your Cloudflare Worker for shared stats
+const BACKEND_BASE = "https://wbrl-stats.eholt0723.workers.dev"; // set to "" to disable
+
+// Helper: raw URL for current stats.json (fallback if BACKEND_BASE is unset)
+const RAW_STATS_URL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${STATS_PATH}`;
+
 // ===================== DOM =====================
 const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
@@ -26,12 +38,16 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
+// Optional global stats UI elements (add these to HTML if you want to show repo totals)
+const globalStatsEl  = document.getElementById("globalStats");   // e.g., a small card/line for totals
+const episodeLabelEl = document.getElementById("episodeLabel");  // optional label area
+
 // ===================== RL UI (optional) =====================
 const ui = window.__WarehouseUI || null;
 
 // Helpers to guard UI calls
 function uiLog(msg){ if (ui && ui.log) ui.log(msg); }
-function uiSetEpisode(n){ if (ui && ui.setEpisode) ui.setEpisode(n); }
+function uiSetEpisode(n){ if (ui && ui.setEpisode) ui.setEpisode(n); if (episodeLabelEl) episodeLabelEl.textContent = `Episode (this device): ${n}`; }
 function uiSetEpsilon(e){ if (ui && ui.setEpsilon) ui.setEpsilon(e); }
 function uiSetSteps(s){ if (ui && ui.setLastSteps) ui.setLastSteps(s); }
 function uiRecordReward(r){ if (ui && ui.recordEpisodeReward) ui.recordEpisodeReward(r); }
@@ -45,6 +61,54 @@ let nextEpisodeNumber = (() => {
   const n = parseInt(localStorage.getItem(LS_KEYS.EPISODE) || "0", 10);
   return Number.isFinite(n) ? n : 0;
 })();
+
+// ===================== Repo-backed Global Stats =====================
+async function fetchStats() {
+  try {
+    // Prefer live Worker stats; fallback to GitHub file if BACKEND_BASE is empty
+    const url = BACKEND_BASE
+      ? `${BACKEND_BASE}/api/stats`
+      : `${RAW_STATS_URL}?t=${Date.now()}`;
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status} on ${url}`);
+    return await r.json();
+  } catch (e) {
+    console.warn("fetchStats failed:", e);
+    return null;
+  }
+}
+
+function renderGlobalStats(data) {
+  if (!globalStatsEl || !data) return;
+  const stepsList = Array.isArray(data.runs) ? data.runs.slice(-3).map(r => r.steps).join(", ") : "—";
+  const avg = (typeof data.average_reward === "number") ? data.average_reward.toFixed(2) : "—";
+  const eps = (typeof data.epsilon === "number") ? data.epsilon.toFixed(2) : "—";
+  globalStatsEl.textContent = `Global — Episode: ${data.episodes ?? "—"} | Avg Reward: ${avg} | Steps (last 3): ${stepsList} | Epsilon: ${eps}`;
+}
+
+async function refreshGlobalStats() {
+  const s = await fetchStats();
+  renderGlobalStats(s);
+}
+
+async function reportEpisodeSummary({ reward, steps, epsilon }) {
+  if (!BACKEND_BASE) {
+    console.warn("BACKEND_BASE not set; skipping reportEpisodeSummary");
+    return;
+  }
+  try {
+    const r = await fetch(`${BACKEND_BASE}/api/report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reward, steps, epsilon })
+    });
+    const text = await r.text(); // read once for better error logs
+    if (!r.ok) throw new Error(`report failed: ${r.status} ${text}`);
+    try { console.log("✅ Worker updated:", JSON.parse(text)); } catch { console.log("✅ Worker updated:", text); }
+  } catch (e) {
+    console.error("❌ reportEpisodeSummary error:", e);
+  }
+}
 
 // ===================== Global State =====================
 let layout = null;
@@ -65,6 +129,12 @@ let episodeReward = 0;
   attachControlHandlers();
   resetSim();
   uiLog("Initialized simulation.");
+
+  // Show existing global totals on load
+  refreshGlobalStats();
+
+  // Optional: light polling to reflect other viewers’ runs (every 20s)
+  // setInterval(refreshGlobalStats, 20000);
 })();
 
 // ===================== Layout loading =====================
@@ -150,7 +220,7 @@ function attachControlHandlers(){
     waitTicks = 0;
 
     draw();
-    statsEl.textContent = `Shipment ready. Items left: ${state.orderCoords.length}`;
+    statsEl.textContent = `Shipment updated. Items left: ${state.orderCoords.length}`;
     uiLog(`Shipment updated. Items: [${planned.join(", ")}]`);
   });
 
@@ -239,7 +309,7 @@ function run(){
       // Reward for successful dock
       episodeReward += 10;
 
-      // Episode end -> record metrics
+      // Episode end -> record metrics (local UI)
       uiSetSteps(state.pathLen);
       if (ui && typeof ui.addStepsLastRun === "function") ui.addStepsLastRun(state.pathLen);
       uiRecordReward(episodeReward);
@@ -252,6 +322,12 @@ function run(){
 
       // Persist the latest episode number as well
       try { localStorage.setItem(LS_KEYS.EPISODE, String(episodeNumber)); } catch {}
+
+      // ---- Report to backend + refresh global stats ----
+      (async () => {
+        await reportEpisodeSummary({ reward: episodeReward, steps: state.pathLen, epsilon });
+        await refreshGlobalStats();
+      })();
 
       return;
     }
@@ -292,10 +368,10 @@ function run(){
         episodeReward -= 0.5;
 
         draw();
-        const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
+        const pauseSec2 = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
         const waitMsg = WAIT_MAX ? ` (${Math.min(waitTicks, WAIT_MAX)}/${WAIT_MAX})` : "";
         statsEl.textContent =
-          `Waiting for clearance${waitMsg}… | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Safety pause: ${pauseSec}s`;
+          `Waiting for clearance${waitMsg}… | Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Safety pause: ${pauseSec2}s`;
 
         // Optional cap: after WAIT_MAX, replan to look for alternative through shelves
         if (WAIT_MAX && waitTicks >= WAIT_MAX) {
