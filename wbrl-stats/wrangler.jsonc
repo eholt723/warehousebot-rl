@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wbrl-stats",
+  "main": "src/index.js",
+  "compatibility_date": "2025-10-11",
+  "compatibility_flags": ["global_fetch_strictly_public"],
+
+  // (Optional) keep assets only if you really want to serve files from ./public at /
+  "assets": { "directory": "./public" },
+
+  "observability": { "enabled": true },
+
+  "kv_namespaces": [
+    {
+      "binding": "STATS",                       // <— CHANGED from WB_STATS
+      "id": "e6b11d2ee03b476aa0cf668ab886c789",
+      "remote": true
+    }
+  ],
+
+  "vars": {
+    "CORS_ALLOW": "https://eholt723.github.io" // <— add this so your site can call the API
+  }
+}
