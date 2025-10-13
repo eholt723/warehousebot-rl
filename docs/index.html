@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>WarehouseBot-RL</title>
   <link rel="stylesheet" href="styles.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
     /* Hide any leftover map controls if older HTML is around */
@@ -67,15 +66,11 @@
   <section id="rl-ui" class="rl-card rl-fixed">
     <header class="rl-card-header">
       <h3>RL Training</h3>
-      <!-- no collapse button -->
     </header>
 
     <div id="rl-body" class="rl-card-body">
       <!-- Top row: PERSISTED metrics -->
       <div id="rl-topline" class="rl-topline"></div>
-
-      <!-- Small reward chart for persisted history (auto-hides if Chart.js missing) -->
-      <div id="rl-reward-chart" class="rl-reward-chart"></div>
 
       <!-- Session-only console (clears on refresh) -->
       <div id="rl-log-stream" class="rl-log-stream" aria-live="polite"></div>
@@ -108,7 +103,6 @@
     const body    = document.getElementById("rl-body");
     const topline = document.getElementById("rl-topline");
     const logEl   = document.getElementById("rl-log-stream");
-    const chartEl = document.getElementById("rl-chart");
 
     function loadArray(key){
       try{ const raw = localStorage.getItem(key);
@@ -117,6 +111,7 @@
         return Array.isArray(a) ? a.map(Number).slice(-MAX_POINTS) : [];
       }catch{ return []; }
     }
+
     function renderTopline(ep, rewards, steps, eps){
       const win = rewards.slice(-AVG_WINDOW);
       const avg = win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
@@ -125,8 +120,23 @@
       const improving = s.length===3 && s[0]>s[1] && s[1]>s[2];
       const trend = s.length ? s.join(" \u2192 ")+(improving?" (improving)":"") : "—";
       const epsStr = Number.isFinite(eps)? eps.toFixed(2) : "1.00";
-      topline.textContent = `Episode: ${ep} · Avg Reward: ${avgStr} · Steps per run: ${trend} · Epsilon: ${epsStr}`;
+
+      // Multi-line & red (override CSS)
+      topline.style.color = "#ff4d4d";
+      topline.style.whiteSpace = "pre-wrap";
+      topline.style.fontFamily = 'Consolas, "Courier New", ui-monospace, Menlo, monospace';
+      topline.style.fontWeight = "normal";
+      topline.style.border = "none";
+      topline.style.background = "transparent";
+      topline.style.padding = "0";
+
+      topline.textContent =
+        "Episode: " + ep + "\n" +
+        "Avg Reward: " + avgStr + "\n" +
+        "Steps per run: " + trend + "\n" +
+        "Epsilon: " + epsStr;
     }
+
     function note(text){
       const div = document.createElement("div");
       div.className = "rl-log-line rl-log-dim";
@@ -160,44 +170,21 @@
     }
     place(); window.addEventListener("resize", place);
 
-    // chart (optional)
-    let chart = null;
-    if (window.Chart && chartEl){
-      chart = new window.Chart(chartEl, {
-        type: "line",
-        data: { labels: rewards.map((_,i)=>i+1),
-          datasets: [{ label: "Reward", data: rewards, tension: 0.25, pointRadius: 0 }] },
-        options: { responsive:true, animation:false,
-          plugins:{ legend:{ display:false } },
-          scales:{ x:{ display:false }, y:{ beginAtZero:false } } }
-      });
-    } else if (chartEl){
-      chartEl.style.display = "none";
-      note("Chart disabled (Chart.js not loaded).");
-    }
-
     // public API used by app.js
     const api = {
-      setEpisode(n){ episode = n; localStorage.setItem(LS.EPISODE, String(n)); renderTopline(episode, rewards, steps, epsilon); },
-      setEpsilon(eps){ epsilon = eps; localStorage.setItem(LS.EPSILON, String(eps)); renderTopline(episode, rewards, steps, epsilon); },
+      setEpisode(n){ episode = n; try{localStorage.setItem(LS.EPISODE, String(n));}catch{} renderTopline(episode, rewards, steps, epsilon); },
+      setEpsilon(eps){ epsilon = eps; try{localStorage.setItem(LS.EPSILON, String(eps));}catch{} renderTopline(episode, rewards, steps, epsilon); },
       setLastSteps(_s){ /* no-op for topline */ },
       recordEpisodeReward(r){
         rewards.push(Number(r));
         if (rewards.length > MAX_POINTS) rewards.splice(0, rewards.length - MAX_POINTS);
-        localStorage.setItem(LS.REWARD_HISTORY, JSON.stringify(rewards));
-        if (chart){
-          const idx = rewards.length;
-          chart.data.labels.push(idx);
-          chart.data.datasets[0].data.push(r);
-          if (chart.data.labels.length > MAX_POINTS){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
-          chart.update();
-        }
+        try{ localStorage.setItem(LS.REWARD_HISTORY, JSON.stringify(rewards)); }catch{}
         renderTopline(episode, rewards, steps, epsilon);
       },
       addStepsLastRun(s){
         steps.push(Number(s));
         if (steps.length > MAX_POINTS) steps.splice(0, steps.length - MAX_POINTS);
-        localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(steps));
+        try{ localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(steps)); }catch{}
         renderTopline(episode, rewards, steps, epsilon);
       },
       log(msg){
@@ -219,7 +206,7 @@
   })();
   </script>
 
-  <!-- Only your app.js now; no training_ui.js file needed -->
+  <!-- Only your app.js now -->
   <script src="app.js" defer></script>
 </body>
 </html>
