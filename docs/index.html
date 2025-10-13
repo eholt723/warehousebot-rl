@@ -44,12 +44,14 @@
     <h1>WarehouseBot-RL — Autonomous Picking Simulation</h1>
 
     <section class="shipment-input">
-      <h2>Please select what items are needed for the current shipment:</h2>
-      <div id="itemButtons" class="item-buttons"><!-- buttons added by JS --></div>
-      <div class="selector-actions">
-        <button id="selectAllBtn" type="button">Select All</button>
-        <button id="clearAllBtn" type="button">Clear</button>
-        <button id="submitItems" type="button">Update Shipment</button>
+      <div class="shipment-toolbar">
+        <div class="item-buttons" id="itemButtons"><!-- buttons added by JS --></div>
+
+        <div class="selector-actions">
+          <button id="selectAllBtn" type="button">Select All</button>
+          <button id="clearAllBtn" type="button">Clear</button>
+          <button id="submitItems" type="button" class="primary">Update Shipment</button>
+        </div>
       </div>
     </section>
 
