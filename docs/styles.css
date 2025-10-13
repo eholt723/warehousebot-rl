@@ -93,25 +93,29 @@ canvas {
   margin-top: 8px;
 }
 
+/* ---- Letter buttons (A–J) ---- */
 .item-btn {
-  width: 40px;
-  height: 40px;
+  flex: 0 0 36px;              /* fixed slot; prevents line reflow */
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 600;
-  font-size: 18px;
+  font-size: 16px;
   border-radius: 8px;
   border: 1px solid var(--line);
+  outline: 2px solid transparent;  /* reserve hover outline space */
   background: #0d1430;
   color: #e9ecff;
   cursor: pointer;
-  transition: background 0.2s, transform 0.1s;
+  transition: background 0.15s, outline-color 0.15s, transform 0.1s;
 }
 
 .item-btn:hover {
   background: #1b245c;
-  transform: scale(1.05);
+  outline-color: #3f52d1;      /* no size change on hover */
+  transform: scale(1.005);     /* ultra-small flourish; no scrollbar */
 }
 
 .item-btn.selected {
@@ -262,23 +266,19 @@ canvas {
   flex: 0 0 auto; /* fixed width cluster */
 }
 
-/* Right cluster: A–J, aligned to the right and scrolls horizontally if needed */
+/* Right cluster: A–J, aligned to the right; prevent horizontal scrollbar on hover */
 .shipment-toolbar .item-buttons {
   display: flex;
   flex: 1 1 auto;
-  justify-content: flex-end; /* push A–J to the right */
+  justify-content: flex-end;   /* push A–J to the right */
   gap: 8px;
-  flex-wrap: nowrap;         /* keep on one line */
-  overflow-x: auto;          /* allow sideways scroll on small screens */
-  padding-bottom: 2px;       /* avoid scrollbar overlap */
+  flex-wrap: nowrap;           /* keep on one line */
+  overflow-x: hidden;          /* <<< hide horizontal overflow */
+  padding-bottom: 2px;         /* avoid scrollbar overlap */
+  -ms-overflow-style: none;    /* IE/Edge legacy */
+  scrollbar-width: none;       /* Firefox */
 }
-
-/* Slightly smaller buttons so all 10 fit with actions */
-.item-btn {
-  width: 36px;
-  height: 36px;
-  font-size: 16px;
-}
+.shipment-toolbar .item-buttons::-webkit-scrollbar { display: none; } /* WebKit */
 
 /* Primary button subtle emphasis */
 .selector-actions .primary {
