@@ -1,287 +1,153 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>WarehouseBot-RL</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WarehouseBot RL — Simulation</title>
+  <meta name="description" content="Reinforcement-Learning Warehouse Bot Simulation by Eric Holt" />
+  <link rel="icon" href="images/favicon.png" />
+  <link rel="stylesheet" href="style.css" />
 
   <style>
-    /* Hide any leftover map controls if older HTML is around */
-    #mapSelect, #loadMapBtn, #mapStatus { display: none !important; }
-
-    /* Desktop/tablet quick start card */
-    #instructions {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      background: rgba(16, 22, 51, .9);
-      border: 1px solid #20285a;
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: #e8ecff;
-      font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      max-width: 320px;
-      z-index: 10;
-    }
-    #instructions h3 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; color: #b9c3ff; }
-    #instructions ol { margin: 0; padding-left: 18px; }
-
-    /* Phone: the mobile intro replaces the desktop instructions */
+    /* ==== Mobile adjustments ==== */
     @media (max-width: 768px) {
-      #instructions { display: none; }
-    }
-
-    /* ===== Mobile-only tweaks (small, clean RL card; no console) ===== */
-    @media (max-width: 768px) {
-      /* When the app puts the page in running mode, shrink the RL card and hide console */
-      body.mobile-running #rl-ui {
-        position: fixed !important;
-        left: 8px !important;
-        right: 8px !important;
-        bottom: 42px !important;   /* sits above footer */
-        width: auto !important;
-        max-height: 28vh !important; /* smaller */
-        z-index: 501;
+      body {
+        flex-direction: column;
+        align-items: center;
       }
-      body.mobile-running #rl-ui .rl-card-body { padding: 6px !important; }
-      body.mobile-running #rl-topline { font-size: 12px !important; line-height: 1.25 !important; }
-      body.mobile-running #rl-log-stream { display: none !important; } /* hide console on mobile */
+      #stage {
+        width: 100%;
+        height: 420px;
+        max-height: 55vh;
+        display: block;
+        margin: 0 auto;
+      }
+      #rl-ui {
+        position: static !important;
+        right: auto !important;
+        bottom: auto !important;
+        width: auto;
+        max-width: none;
+        margin: 8px 12px 0 12px;
+      }
+      #rl-ui .rl-card-body { padding: 8px 10px; }
+      #rl-log-stream { display: none !important; }
     }
   </style>
 </head>
 
 <body>
-  <!-- Desktop/tablet quick start -->
-  <div id="instructions" aria-label="How to use">
-    <h3>Quick Start:</h3>
-    <ol>
-      <li>Select items for the shipment (A–J)</li>
-      <li>Click <strong>Update Shipment</strong>.</li>
-      <li>Click <strong>Start Simulation</strong>.</li>
-      <li>Keep your eye on the Blue Bot.</li>
-    </ol>
-  </div>
-
-  <!-- ===== Mobile Intro (tap anywhere) ===== -->
-  <div id="mobileIntro" hidden>
-    <div class="mi-card" role="dialog" aria-label="Quick Start - Tap to continue">
-      <h3>Quick Start</h3>
-      <ol>
-        <li>Select items (A–J)</li>
-        <li>Tap <strong>Update Shipment</strong></li>
-        <li>Tap <strong>Start Simulation</strong></li>
-        <li>Keep your eye on the Blue Bot.</li>
-      </ol>
-      <p class="mi-hint">Tap anywhere to continue</p>
-    </div>
-  </div>
-
-  <!-- ===== Mobile Setup (item picker + start) ===== -->
-  <div id="mobileSetup" hidden>
-    <div class="ms-card" role="dialog" aria-label="Setup Shipment">
-      <h3>Set up your shipment</h3>
-
-      <div class="ms-toolbar">
-        <div class="ms-actions">
-          <button id="mSelectAllBtn" type="button">Select All</button>
-          <button id="mClearAllBtn" type="button">Clear</button>
-          <button id="mSubmitItems" type="button" class="primary">Update Shipment</button>
-        </div>
-      </div>
-
-      <div class="item-buttons" id="mobileItemButtons"><!-- built by app.js --></div>
-
-      <div class="ms-footer">
-        <button id="mStartBtn" type="button" class="primary">Start Simulation</button>
-      </div>
-    </div>
-  </div>
-
+  <h1>WarehouseBot RL Simulation</h1>
   <main>
-    <h1>WarehouseBot-RL — Autonomous Picking Simulation</h1>
+    <div id="instructions">Select shipment items and start the simulation.</div>
 
-    <!-- Desktop/tablet shipment toolbar -->
-    <section class="shipment-input">
-      <div class="shipment-toolbar">
-        <div class="selector-actions">
-          <button id="selectAllBtn" type="button">Select All</button>
-          <button id="clearAllBtn" type="button">Clear</button>
-          <button id="submitItems" type="button" class="primary">Update Shipment</button>
-        </div>
-
-        <div class="item-buttons" id="itemButtons"><!-- buttons added by app.js --></div>
-      </div>
+    <!-- ======= Desktop Controls ======= -->
+    <section class="controls">
+      <button id="selectAllBtn">Select All</button>
+      <button id="clearAllBtn">Clear</button>
+      <button id="submitItems">Update Shipment</button>
+      <button id="startBtn">Start Simulation</button>
+      <button id="resetBtn">Reset</button>
     </section>
 
-    <div class="controls">
-      <button id="startBtn" type="button">Start Simulation</button>
-      <button id="resetBtn" type="button">Reset</button>
-      <span id="stats"></span>
+    <!-- ======= Item Buttons ======= -->
+    <section id="itemButtons" class="shipment-input"></section>
+
+    <!-- ======= Map Canvas ======= -->
+    <canvas id="stage" width="900" height="540"></canvas>
+
+    <!-- ======= Stats Text ======= -->
+    <div id="stats">Loading layout...</div>
+
+    <div id="legend">
+      <p>Green = drop | Cyan = dock | Gray = people | Blue = bot</p>
     </div>
 
-    <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
+    <footer>
+      <p>Created by Eric Holt · <a href="https://github.com/eholt723/warehousebot-rl" target="_blank">GitHub Repo</a></p>
+    </footer>
   </main>
 
-  <!-- === RL Telemetry === -->
-  <section id="rl-ui" class="rl-card rl-fixed">
-    <header class="rl-card-header">
-      <h3>RL Training</h3>
-    </header>
-
-    <div id="rl-body" class="rl-card-body">
-      <div id="rl-topline" class="rl-topline"></div>
-      <div id="rl-log-stream" class="rl-log-stream" aria-live="polite"></div>
+  <!-- ======= Mobile Intro ======= -->
+  <div id="mobileIntro" hidden>
+    <div class="overlay">
+      <h2>Quick Start</h2>
+      <p>Tap anywhere to begin the warehouse simulation.</p>
     </div>
-  </section>
+  </div>
 
-  <!-- Fixed legend bottom-right -->
-  <aside id="legend">
-    <div class="row"><span class="k bot"></span> Bot</div>
-    <div class="row"><span class="k item"></span> Stock Items</div>
-    <div class="row"><span class="k picked"></span> Picked</div>
-    <div class="row"><span class="k shelf"></span> Shelves / Obstacles</div>
-    <div class="row"><span class="k person"></span> People (random walkers)</div>
-    <div class="row"><span class="k drop"></span> Drop location (box)</div>
-    <div class="row"><span class="k dock"></span> Docking station</div>
-  </aside>
+  <!-- ======= Mobile Setup ======= -->
+  <div id="mobileSetup" hidden>
+    <div class="overlay">
+      <h2>Select Items</h2>
+      <div id="mobileItemButtons"></div>
+      <div class="mobile-btns">
+        <button id="mSelectAllBtn">Select All</button>
+        <button id="mClearAllBtn">Clear</button>
+        <button id="mSubmitItems">Update Shipment</button>
+        <button id="mStartBtn">Start Simulation</button>
+      </div>
+    </div>
+  </div>
 
-  <!-- Inline RL UI bootstrap -->
+  <!-- ======= RL UI Overlay ======= -->
+  <div id="rl-ui" class="rl-card">
+    <div class="rl-card-body">
+      <h2>RL Training</h2>
+      <div id="rl-episodes">Episode: <span id="rl-ep">0</span></div>
+      <div id="rl-epsilon">Epsilon: <span id="rl-eps">1.00</span></div>
+      <div id="rl-avg">Avg Reward: <span id="rl-avg-val">0</span></div>
+      <div id="rl-steps">Steps / Run: <span id="rl-steps-val">0</span></div>
+      <div id="rl-log-stream" class="rl-log"></div>
+    </div>
+  </div>
+
   <script>
-  (function () {
-    const LS = {
-      EPISODE: "whbot_episode",
-      EPSILON: "whbot_epsilon",
-      REWARD_HISTORY: "whbot_reward_history",
-      STEPS_HISTORY: "whbot_steps_history"
-    };
-    const AVG_WINDOW = 100, MAX_POINTS = 1000;
+    /* ======= RL UI Bootstrap ======= */
+    (function () {
+      const panel = document.getElementById("rl-ui");
+      const ep = document.getElementById("rl-ep");
+      const eps = document.getElementById("rl-eps");
+      const avg = document.getElementById("rl-avg-val");
+      const steps = document.getElementById("rl-steps-val");
+      const logBox = document.getElementById("rl-log-stream");
 
-    const panel   = document.getElementById("rl-ui");
-    const body    = document.getElementById("rl-body");
-    const topline = document.getElementById("rl-topline");
-    const logEl   = document.getElementById("rl-log-stream");
+      window.__WarehouseUI = {
+        log(msg) {
+          const line = document.createElement("div");
+          line.textContent = msg;
+          logBox?.appendChild(line);
+          if (logBox) logBox.scrollTop = logBox.scrollHeight;
+        },
+        setEpisode(n) { ep.textContent = n; },
+        setEpsilon(e) { eps.textContent = e.toFixed(2); },
+        setLastSteps(s) { steps.textContent = s; },
+        recordEpisodeReward(r) { avg.textContent = r.toFixed(1); },
+        setRemoteTopline(avgVal, last3) {
+          if (avgVal !== null) avg.textContent = avgVal.toFixed(1);
+          if (last3?.length) steps.textContent = Math.round(last3.reduce((a,b)=>a+b,0)/last3.length);
+        }
+      };
 
-    function loadArray(key){
-      try{
-        const raw = localStorage.getItem(key);
-        if(!raw) return [];
-        const a = JSON.parse(raw);
-        return Array.isArray(a) ? a.map(Number).slice(-MAX_POINTS) : [];
-      }catch{ return []; }
-    }
+      function place() {
+        // ⬇️ Skip fixed positioning on mobile so it sits under the map
+        if (window.matchMedia("(max-width: 768px)").matches) return;
 
-    // Optional remote overrides (from backend) so phones & desktops match
-    let remoteAvg = null;        // number | null
-    let remoteSteps = null;      // number[] | null
-
-    function renderTopline(ep, rewards, steps, eps){
-      // If backend provided overrides, use those in the display
-      const avgLocal = (() => {
-        const win = rewards.slice(-AVG_WINDOW);
-        return win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
-      })();
-      const avg = (remoteAvg ?? avgLocal);
-      const avgStr = (avg>=0?"+":"")+avg.toFixed(1);
-
-      const s = (remoteSteps && remoteSteps.length ? remoteSteps.slice(-3) : steps.slice(-3));
-      const improving = s.length===3 && s[0]>s[1] && s[1]>s[2];
-      const trend = s.length ? s.join(", ") + (improving ? " (improving)" : "") : "—";
-
-      const epsStr = Number.isFinite(eps)? eps.toFixed(2) : "1.00";
-
-      topline.style.color = "#ff4d4d";
-      topline.style.whiteSpace = "pre-wrap";
-      topline.style.fontFamily = 'Consolas, "Courier New", ui-monospace, Menlo, monospace';
-      topline.style.fontWeight = "normal";
-      topline.style.border = "none";
-      topline.style.background = "transparent";
-      topline.style.padding = "0";
-
-      topline.textContent =
-        "Episode: " + ep + "\n" +
-        "Avg Reward: " + avgStr + "\n" +
-        "Steps per run: " + trend + "\n" +
-        "Epsilon: " + epsStr;
-    }
-
-    function note(text){
-      const div = document.createElement("div");
-      div.className = "rl-log-line rl-log-dim";
-      div.textContent = text;
-      logEl.appendChild(div);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    if (!panel || !body || !topline || !logEl){
-      console.warn("[RL UI] required elements missing");
-      return;
-    }
-
-    let episode = parseInt(localStorage.getItem(LS.EPISODE) || "0", 10);
-    let epsilon = parseFloat(localStorage.getItem(LS.EPSILON) || "1.0");
-    let rewards = loadArray(LS.REWARD_HISTORY);
-    let steps   = loadArray(LS.STEPS_HISTORY);
-
-    function place(){
-      // Skip desktop positioning while mobile-running; CSS handles it
-      if (document.body.classList.contains('mobile-running') &&
-          window.matchMedia('(max-width: 768px)').matches) {
-        return;
+        const legend = document.getElementById("legend");
+        const h = legend ? legend.getBoundingClientRect().height : 160;
+        panel.style.position = "fixed";
+        panel.style.right = "16px";
+        panel.style.bottom = (16 + h + 12) + "px";
+        panel.style.width = "340px";
+        panel.style.maxHeight = "58vh";
+        panel.style.overflow = "hidden";
+        panel.style.zIndex = "501";
       }
-      const legend = document.getElementById("legend");
-      const h = legend ? legend.getBoundingClientRect().height : 160;
-      panel.style.position = "fixed";
-      panel.style.right = "16px";
-      panel.style.bottom = (16 + h + 12) + "px";
-      panel.style.width = "340px";
-      panel.style.maxHeight = "58vh";
-      panel.style.overflow = "hidden";
-      panel.style.zIndex = "501";
-    }
-    place(); window.addEventListener("resize", place);
-
-    const api = {
-      setEpisode(n){ episode = n; try{localStorage.setItem(LS.EPISODE, String(n));}catch{} renderTopline(episode, rewards, steps, epsilon); },
-      setEpsilon(eps){ epsilon = eps; try{localStorage.setItem(LS.EPSILON, String(eps));}catch{} renderTopline(episode, rewards, steps, epsilon); },
-      setLastSteps(_s){},
-      recordEpisodeReward(r){
-        rewards.push(Number(r));
-        if (rewards.length > MAX_POINTS) rewards.splice(0, rewards.length - MAX_POINTS);
-        try{ localStorage.setItem(LS.REWARD_HISTORY, JSON.stringify(rewards)); }catch{}
-        renderTopline(episode, rewards, steps, epsilon);
-      },
-      addStepsLastRun(s){
-        steps.push(Number(s));
-        if (steps.length > MAX_POINTS) steps.splice(0, steps.length - MAX_POINTS);
-        try{ localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(steps)); }catch{}
-        renderTopline(episode, rewards, steps, epsilon);
-      },
-      // NEW: allow app.js to sync Avg Reward and Steps per run from backend
-      setRemoteTopline(avgNumber, lastStepsArray){
-        remoteAvg = (typeof avgNumber === "number" && Number.isFinite(avgNumber)) ? avgNumber : null;
-        remoteSteps = Array.isArray(lastStepsArray) ? lastStepsArray.map(Number) : null;
-        renderTopline(episode, rewards, steps, epsilon);
-      },
-      log(msg){
-        const ts = new Date().toLocaleTimeString();
-        const div = document.createElement("div");
-        div.className = "rl-log-line";
-        div.textContent = `[${ts}] ${msg}`;
-        logEl.appendChild(div);
-        logEl.scrollTop = logEl.scrollHeight;
-      }
-    };
-
-    window.__WarehouseUI = api;
-    renderTopline(episode, rewards, steps, epsilon);
-    api.log("RL UI initialized.");
-  })();
+      place();
+      window.addEventListener("resize", place);
+    })();
   </script>
 
-  <!-- Main app (mobile flow + backend sync) -->
-  <script src="app.js?v=20251013" defer></script>
-
-  <footer id="signature">Created by Eric Holt</footer>
+  <script src="app.js"></script>
 </body>
 </html>

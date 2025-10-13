@@ -398,3 +398,29 @@ canvas { margin-top: 8px; }
   }
 }
 
+/* Mobile: RL panel sits right under the canvas */
+@media (max-width: 768px) {
+  /* shrink the map a bit */
+  #stage {
+    width: 100%;
+    height: 420px;         /* tweak if you want a bit taller/shorter */
+    max-height: 55vh;
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* make RL panel inline (not fixed), hugging the map bottom */
+  #rl-ui {
+    position: static !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: auto;
+    max-width: none;
+    margin: 8px 12px 0 12px;   /* small gap under the map */
+  }
+
+  /* tighten the card and hide the console on mobile */
+  #rl-ui .rl-card-body { padding: 8px 10px; }
+  #rl-log-stream { display: none !important; }
+}
+
