@@ -75,10 +75,12 @@ async function fetchStats() {
   }
 }
 
-/** sync Episode/Epsilon to shared totals (no extra UI) */
+/** sync Episode/Epsilon + Avg/Steps to shared totals (no extra UI) */
 async function syncToplineFromBackend() {
   const s = await fetchStats();
   if (!s) return;
+
+  // Episode / Epsilon (shared counters)
   if (typeof s.episodes === "number") {
     uiSetEpisode(s.episodes);
     try { localStorage.setItem(LS_KEYS.EPISODE, String(s.episodes)); } catch {}
@@ -88,6 +90,13 @@ async function syncToplineFromBackend() {
     uiSetEpsilon(s.epsilon);
     try { localStorage.setItem(LS_KEYS.EPSILON, String(s.epsilon)); } catch {}
     epsilon = s.epsilon;
+  }
+
+  // Avg Reward + Steps per run (shared topline display)
+  if (ui && typeof ui.setRemoteTopline === "function") {
+    const avg = (typeof s.average_reward === "number") ? s.average_reward : null;
+    const last3 = Array.isArray(s.runs) ? s.runs.slice(-3).map(r => r.steps) : [];
+    ui.setRemoteTopline(avg, last3);
   }
 }
 
@@ -735,6 +744,7 @@ function twoOptImprove(order, itemMap, start){
         const alt = Math.abs(a[0]-c[0]) + Math.abs(a[1]-c[1])
                   + Math.abs(b[0]-d[0]) + Math.abs(b[1]-d[1]);
         if (alt + 1e-4 < cur) {
+          // reverse the segment i..j in both path and labels (labels are offset by 1)
           path.splice(i, j - i + 1, ...path.slice(i, j + 1).reverse());
           labels.splice(i-1, j - (i-1), ...labels.slice(i-1, j).reverse());
           improved = true;

@@ -10,7 +10,7 @@
     /* Hide any leftover map controls if older HTML is around */
     #mapSelect, #loadMapBtn, #mapStatus { display: none !important; }
 
-    /* Simple instructions in the upper-left (desktop/tablet only) */
+    /* Desktop/tablet quick start card */
     #instructions {
       position: absolute;
       top: 12px;
@@ -27,9 +27,26 @@
     #instructions h3 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; color: #b9c3ff; }
     #instructions ol { margin: 0; padding-left: 18px; }
 
-    /* Hide desktop instructions on phones (the mobile intro replaces it) */
+    /* Phone: the mobile intro replaces the desktop instructions */
     @media (max-width: 768px) {
       #instructions { display: none; }
+    }
+
+    /* ===== Mobile-only tweaks (small, clean RL card; no console) ===== */
+    @media (max-width: 768px) {
+      /* When the app puts the page in running mode, shrink the RL card and hide console */
+      body.mobile-running #rl-ui {
+        position: fixed !important;
+        left: 8px !important;
+        right: 8px !important;
+        bottom: 42px !important;   /* sits above footer */
+        width: auto !important;
+        max-height: 28vh !important; /* smaller */
+        z-index: 501;
+      }
+      body.mobile-running #rl-ui .rl-card-body { padding: 6px !important; }
+      body.mobile-running #rl-topline { font-size: 12px !important; line-height: 1.25 !important; }
+      body.mobile-running #rl-log-stream { display: none !important; } /* hide console on mobile */
     }
   </style>
 </head>
@@ -154,15 +171,23 @@
       }catch{ return []; }
     }
 
+    // Optional remote overrides (from backend) so phones & desktops match
+    let remoteAvg = null;        // number | null
+    let remoteSteps = null;      // number[] | null
+
     function renderTopline(ep, rewards, steps, eps){
-      const win = rewards.slice(-AVG_WINDOW);
-      const avg = win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
+      // If backend provided overrides, use those in the display
+      const avgLocal = (() => {
+        const win = rewards.slice(-AVG_WINDOW);
+        return win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
+      })();
+      const avg = (remoteAvg ?? avgLocal);
       const avgStr = (avg>=0?"+":"")+avg.toFixed(1);
 
-      const s = steps.slice(-3);
+      const s = (remoteSteps && remoteSteps.length ? remoteSteps.slice(-3) : steps.slice(-3));
       const improving = s.length===3 && s[0]>s[1] && s[1]>s[2];
-
       const trend = s.length ? s.join(", ") + (improving ? " (improving)" : "") : "—";
+
       const epsStr = Number.isFinite(eps)? eps.toFixed(2) : "1.00";
 
       topline.style.color = "#ff4d4d";
@@ -173,13 +198,11 @@
       topline.style.background = "transparent";
       topline.style.padding = "0";
 
-      let text =
+      topline.textContent =
         "Episode: " + ep + "\n" +
         "Avg Reward: " + avgStr + "\n" +
         "Steps per run: " + trend + "\n" +
         "Epsilon: " + epsStr;
-
-      topline.textContent = text.replace(/\u2192|→/g, ", ");
     }
 
     function note(text){
@@ -234,6 +257,12 @@
         try{ localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(steps)); }catch{}
         renderTopline(episode, rewards, steps, epsilon);
       },
+      // NEW: allow app.js to sync Avg Reward and Steps per run from backend
+      setRemoteTopline(avgNumber, lastStepsArray){
+        remoteAvg = (typeof avgNumber === "number" && Number.isFinite(avgNumber)) ? avgNumber : null;
+        remoteSteps = Array.isArray(lastStepsArray) ? lastStepsArray.map(Number) : null;
+        renderTopline(episode, rewards, steps, epsilon);
+      },
       log(msg){
         const ts = new Date().toLocaleTimeString();
         const div = document.createElement("div");
@@ -250,7 +279,7 @@
   })();
   </script>
 
-  <!-- Main app (contains mobile flow: intro -> setup -> run) -->
+  <!-- Main app (mobile flow + backend sync) -->
   <script src="app.js?v=20251013" defer></script>
 
   <footer id="signature">Created by Eric Holt</footer>
