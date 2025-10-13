@@ -27,7 +27,7 @@ function renderTopline(el, episode, rewards, steps, epsilon) {
 
   const s = steps.slice(-3);
   const improving = s.length === 3 && s[0] > s[1] && s[1] > s[2];
-  const trend = s.length ? s.join(" \u2192 ") + (improving ? " (improving)" : "") : "—";
+  const trend = s.length ? s.join(", ") + (improving ? " (improving)" : "") : "—";
 
   const epsStr = Number.isFinite(epsilon) ? epsilon.toFixed(2) : "1.00";
   el.textContent = `Episode: ${episode} · Avg Reward: ${avgStr} · Steps per run: ${trend} · Epsilon: ${epsStr}`;
