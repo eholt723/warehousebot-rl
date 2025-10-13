@@ -38,6 +38,10 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
+// ----- Mobile overlays -----
+const mobileIntroEl = document.getElementById("mobileIntro");
+const mobileSetupEl = document.getElementById("mobileSetup");
+
 // ===================== RL UI (optional) =====================
 const ui = window.__WarehouseUI || null;
 
@@ -111,6 +115,101 @@ async function reportEpisodeSummary({ reward, steps, epsilon }) {
   }
 }
 
+// ===================== Mobile-only flow =====================
+const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+
+// Build mobile item buttons (separate from desktop list)
+function buildItemSelectorMobile(itemsObj) {
+  const container = document.getElementById("mobileItemButtons");
+  if (!container) return;
+  container.innerHTML = "";
+  Object.keys(itemsObj).sort().forEach(label => {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.className = "item-btn";
+    btn.dataset.item = label;
+    btn.onclick = () => btn.classList.toggle("selected");
+    container.appendChild(btn);
+  });
+}
+
+// Orchestrate the mobile intro → setup → start flow
+function attachMobileFlowHandlers(){
+  const intro  = mobileIntroEl;
+  const setup  = mobileSetupEl;
+
+  const mSelectAllBtn = document.getElementById("mSelectAllBtn");
+  const mClearAllBtn  = document.getElementById("mClearAllBtn");
+  const mSubmitItems  = document.getElementById("mSubmitItems");
+  const mStartBtn     = document.getElementById("mStartBtn");
+
+  if (!intro || !setup) return;
+
+  // Start in "locked" mode on mobile (hide main UI via CSS media query)
+  document.body.classList.add("mobile-locked");
+  intro.hidden = false;
+
+  // 1) Tap anywhere to continue to setup popup
+  intro.addEventListener("click", () => {
+    intro.hidden = true;
+    setup.hidden = false;
+  });
+
+  // 2) Selection helpers
+  mSelectAllBtn?.addEventListener("click", () => {
+    document.querySelectorAll("#mobileItemButtons .item-btn")
+      .forEach(b => b.classList.add("selected"));
+  });
+  mClearAllBtn?.addEventListener("click", () => {
+    document.querySelectorAll("#mobileItemButtons .item-btn")
+      .forEach(b => b.classList.remove("selected"));
+  });
+
+  // 2b) Update shipment (mobile)
+  mSubmitItems?.addEventListener("click", (e) => {
+    e.preventDefault();
+    const selected = Array.from(document.querySelectorAll("#mobileItemButtons .item-btn.selected"))
+      .map(b => b.dataset.item);
+
+    if (selected.length === 0) {
+      alert("Select at least one item (A–J).");
+      return;
+    }
+
+    // Same internal planning as desktop
+    state.displayOrder = selected.slice();
+    const nn = orderByNearestNeighbor(selected, layout.items, state.dock);
+    const planned = twoOptImprove(nn, layout.items, state.dock);
+
+    state.orderLabels = planned;
+    state.orderCoords = planned.map(s => layout.items[s]);
+
+    state.picked = [];
+    state.pathLen = 0;
+    state.time = 0;
+    state.safetyPauseTicks = 0;
+    state.delivered = false;
+    state.phase = "picking";
+    currentPath = [];
+    waitTicks = 0;
+
+    draw();
+    statsEl.textContent = `Shipment updated. Items left: ${state.orderCoords.length}`;
+    uiLog(`Shipment updated (mobile). Items: [${planned.join(", ")}]`);
+  });
+
+  // 3) Start Simulation → hide setup, reveal map, run
+  mStartBtn?.addEventListener("click", () => {
+    if (!state.orderCoords || state.orderCoords.length === 0) {
+      alert("Pick items first (Update Shipment).");
+      return;
+    }
+    setup.hidden = true;
+    document.body.classList.remove("mobile-locked"); // show main UI
+    run();
+  });
+}
+
 // ===================== Global State =====================
 let layout = null;
 let state  = null;
@@ -127,6 +226,7 @@ let episodeReward = 0;
 (async function init(){
   await loadRandomLayout();
   buildItemSelector(layout.items);
+  if (isMobile) { buildItemSelectorMobile(layout.items); attachMobileFlowHandlers(); }
   attachControlHandlers();
   resetSim();
   uiLog("Initialized simulation.");
@@ -234,6 +334,7 @@ function attachControlHandlers(){
     clearInterval(tickTimer);
     await loadRandomLayout();           // random map each reset
     buildItemSelector(layout.items);
+    if (isMobile) buildItemSelectorMobile(layout.items);
     resetSim();
   });
 }
