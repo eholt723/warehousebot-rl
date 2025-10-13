@@ -38,7 +38,7 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
-// ----- Mobile overlays -----
+// ----- Mobile overlays (from index.html) -----
 const mobileIntroEl = document.getElementById("mobileIntro");
 const mobileSetupEl = document.getElementById("mobileSetup");
 
@@ -75,19 +75,14 @@ async function fetchStats() {
   }
 }
 
-/**
- * Quietly updates the RL panel using backend stats (no extra UI elements).
- * We only set Episode and Epsilon to reflect the shared totals so all devices
- * show the same running count. Rewards/steps stay device-local.
- */
+/** sync Episode/Epsilon to shared totals (no extra UI) */
 async function syncToplineFromBackend() {
   const s = await fetchStats();
   if (!s) return;
   if (typeof s.episodes === "number") {
-    // Update RL panel + persist so this device shows the shared total
     uiSetEpisode(s.episodes);
     try { localStorage.setItem(LS_KEYS.EPISODE, String(s.episodes)); } catch {}
-    nextEpisodeNumber = s.episodes; // keep internal counter in sync
+    nextEpisodeNumber = s.episodes;
   }
   if (typeof s.epsilon === "number") {
     uiSetEpsilon(s.epsilon);
@@ -97,10 +92,7 @@ async function syncToplineFromBackend() {
 }
 
 async function reportEpisodeSummary({ reward, steps, epsilon }) {
-  if (!BACKEND_BASE) {
-    console.warn("BACKEND_BASE not set; skipping reportEpisodeSummary");
-    return;
-  }
+  if (!BACKEND_BASE) return;
   try {
     const r = await fetch(`${BACKEND_BASE}/api/report`, {
       method: "POST",
@@ -118,7 +110,6 @@ async function reportEpisodeSummary({ reward, steps, epsilon }) {
 // ===================== Mobile-only flow =====================
 const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
 
-// Build mobile item buttons (separate from desktop list)
 function buildItemSelectorMobile(itemsObj) {
   const container = document.getElementById("mobileItemButtons");
   if (!container) return;
@@ -133,7 +124,6 @@ function buildItemSelectorMobile(itemsObj) {
   });
 }
 
-// Orchestrate the mobile intro → setup → start flow
 function attachMobileFlowHandlers(){
   const intro  = mobileIntroEl;
   const setup  = mobileSetupEl;
@@ -145,7 +135,7 @@ function attachMobileFlowHandlers(){
 
   if (!intro || !setup) return;
 
-  // Start in "locked" mode on mobile (hide main UI via CSS media query)
+  // Start in "locked" mode on mobile (hide main UI via CSS)
   document.body.classList.add("mobile-locked");
   intro.hidden = false;
 
@@ -198,14 +188,18 @@ function attachMobileFlowHandlers(){
     uiLog(`Shipment updated (mobile). Items: [${planned.join(", ")}]`);
   });
 
-  // 3) Start Simulation → hide setup, reveal map, run
+  // 3) Start Simulation → hide setup, reveal map, run (and streamline)
   mStartBtn?.addEventListener("click", () => {
     if (!state.orderCoords || state.orderCoords.length === 0) {
       alert("Pick items first (Update Shipment).");
       return;
     }
+    // Hide overlays + slim UI for mobile running
     setup.hidden = true;
-    document.body.classList.remove("mobile-locked"); // show main UI
+    document.body.classList.remove("mobile-locked");
+    document.body.classList.add("mobile-running");
+    const instr = document.getElementById("instructions");
+    if (instr) instr.style.display = "none";
     run();
   });
 }
@@ -327,6 +321,12 @@ function attachControlHandlers(){
       alert("Pick items first (Update Shipment).");
       return;
     }
+    // If they start via desktop controls on a phone, still streamline
+    if (isMobile) {
+      document.body.classList.add("mobile-running");
+      const instr = document.getElementById("instructions");
+      if (instr) instr.style.display = "none";
+    }
     run();
   });
 
@@ -335,6 +335,8 @@ function attachControlHandlers(){
     await loadRandomLayout();           // random map each reset
     buildItemSelector(layout.items);
     if (isMobile) buildItemSelectorMobile(layout.items);
+    // reset mobile classes so onboarding can show again if desired
+    document.body.classList.remove("mobile-running");
     resetSim();
   });
 }
@@ -733,7 +735,6 @@ function twoOptImprove(order, itemMap, start){
         const alt = Math.abs(a[0]-c[0]) + Math.abs(a[1]-c[1])
                   + Math.abs(b[0]-d[0]) + Math.abs(b[1]-d[1]);
         if (alt + 1e-4 < cur) {
-          // reverse the segment i..j in both path and labels (labels are offset by 1)
           path.splice(i, j - i + 1, ...path.slice(i, j + 1).reverse());
           labels.splice(i-1, j - (i-1), ...labels.slice(i-1, j).reverse());
           improved = true;

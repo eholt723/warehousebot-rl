@@ -355,3 +355,28 @@ canvas { margin-top: 8px; }
     width: 40px; height: 40px; font-size: 18px;
   }
 }
+
+/* Streamlined mobile run view */
+@media (max-width: 768px) {
+  /* Hide the desktop instructions entirely on mobile */
+  #instructions { display: none !important; }
+
+  /* After Start Simulation on mobile */
+  body.mobile-running .shipment-input,
+  body.mobile-running .controls,
+  body.mobile-running #rl-ui { display: none !important; }
+
+  body.mobile-running main { margin: 0; padding: 0; }
+  body.mobile-running canvas {
+    margin: 0;
+    width: 100vw;
+    height: calc(100vh - 8px); /* fill screen */
+  }
+
+  body.mobile-running #legend {
+    right: 8px;
+    bottom: 8px;
+    transform: scale(.9);
+    opacity: .9;
+  }
+}
