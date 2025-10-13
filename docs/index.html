@@ -63,21 +63,18 @@
     <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
   </main>
 
-  <!-- === RL Telemetry: one compact panel, right side ABOVE legend === -->
+  <!-- === RL Telemetry: compact panel, right side ABOVE legend === -->
   <section id="rl-ui" class="rl-card rl-fixed">
     <header class="rl-card-header">
       <h3>RL Training</h3>
-      <button id="rl-collapse" class="rl-btn" aria-expanded="true">Collapse</button>
+      <!-- no collapse button -->
     </header>
 
     <div id="rl-body" class="rl-card-body">
-      <!-- Top row: PERSISTED metrics (from localStorage) -->
-      <div id="rl-topline" class="rl-topline">
-        <!-- Filled by JS, e.g.:
-             Episode: 237 · Avg Reward: +23.4 · Steps per run: 68 → 45 → 31 (improving) · Epsilon: 0.22 -->
-      </div>
+      <!-- Top row: PERSISTED metrics -->
+      <div id="rl-topline" class="rl-topline"></div>
 
-      <!-- Small reward chart for persisted history -->
+      <!-- Small reward chart for persisted history (auto-hides if Chart.js missing) -->
       <canvas id="rl-chart" height="100"></canvas>
 
       <!-- Session-only console (clears on refresh) -->
@@ -96,8 +93,133 @@
     <div class="row"><span class="k dock"></span> Docking station</div>
   </aside>
 
-  <!-- IMPORTANT: load UI first so app.js can talk to it -->
-  <script src="./training_ui.js" defer></script>
+  <!-- Inline UI bootstrap so it's guaranteed to exist before app.js -->
+  <script>
+  (function () {
+    const LS = {
+      EPISODE: "whbot_episode",
+      EPSILON: "whbot_epsilon",
+      REWARD_HISTORY: "whbot_reward_history",
+      STEPS_HISTORY: "whbot_steps_history"
+    };
+    const AVG_WINDOW = 100, MAX_POINTS = 1000;
+
+    const panel   = document.getElementById("rl-ui");
+    const body    = document.getElementById("rl-body");
+    const topline = document.getElementById("rl-topline");
+    const logEl   = document.getElementById("rl-log-stream");
+    const chartEl = document.getElementById("rl-chart");
+
+    function loadArray(key){
+      try{ const raw = localStorage.getItem(key);
+        if(!raw) return [];
+        const a = JSON.parse(raw);
+        return Array.isArray(a) ? a.map(Number).slice(-MAX_POINTS) : [];
+      }catch{ return []; }
+    }
+    function renderTopline(ep, rewards, steps, eps){
+      const win = rewards.slice(-AVG_WINDOW);
+      const avg = win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
+      const avgStr = (avg>=0?"+":"")+avg.toFixed(1);
+      const s = steps.slice(-3);
+      const improving = s.length===3 && s[0]>s[1] && s[1]>s[2];
+      const trend = s.length ? s.join(" \u2192 ")+(improving?" (improving)":"") : "—";
+      const epsStr = Number.isFinite(eps)? eps.toFixed(2) : "1.00";
+      topline.textContent = `Episode: ${ep} · Avg Reward: ${avgStr} · Steps per run: ${trend} · Epsilon: ${epsStr}`;
+    }
+    function note(text){
+      const div = document.createElement("div");
+      div.className = "rl-log-line rl-log-dim";
+      div.textContent = text;
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    if (!panel || !body || !topline || !logEl){
+      console.warn("[RL UI] required elements missing");
+      return;
+    }
+
+    // persistent state
+    let episode = parseInt(localStorage.getItem(LS.EPISODE) || "0", 10);
+    let epsilon = parseFloat(localStorage.getItem(LS.EPSILON) || "1.0");
+    let rewards = loadArray(LS.REWARD_HISTORY);
+    let steps   = loadArray(LS.STEPS_HISTORY);
+
+    // place panel above legend
+    function place(){
+      const legend = document.getElementById("legend");
+      const h = legend ? legend.getBoundingClientRect().height : 160;
+      panel.style.position = "fixed";
+      panel.style.right = "16px";
+      panel.style.bottom = (16 + h + 12) + "px";
+      panel.style.width = "340px";
+      panel.style.maxHeight = "58vh";
+      panel.style.overflow = "hidden";
+      panel.style.zIndex = "501";
+    }
+    place(); window.addEventListener("resize", place);
+
+    // chart (optional)
+    let chart = null;
+    if (window.Chart && chartEl){
+      chart = new window.Chart(chartEl, {
+        type: "line",
+        data: { labels: rewards.map((_,i)=>i+1),
+          datasets: [{ label: "Reward", data: rewards, tension: 0.25, pointRadius: 0 }] },
+        options: { responsive:true, animation:false,
+          plugins:{ legend:{ display:false } },
+          scales:{ x:{ display:false }, y:{ beginAtZero:false } } }
+      });
+    } else if (chartEl){
+      chartEl.style.display = "none";
+      note("Chart disabled (Chart.js not loaded).");
+    }
+
+    // public API used by app.js
+    const api = {
+      setEpisode(n){ episode = n; localStorage.setItem(LS.EPISODE, String(n)); renderTopline(episode, rewards, steps, epsilon); },
+      setEpsilon(eps){ epsilon = eps; localStorage.setItem(LS.EPSILON, String(eps)); renderTopline(episode, rewards, steps, epsilon); },
+      setLastSteps(_s){ /* no-op for topline */ },
+      recordEpisodeReward(r){
+        rewards.push(Number(r));
+        if (rewards.length > MAX_POINTS) rewards.splice(0, rewards.length - MAX_POINTS);
+        localStorage.setItem(LS.REWARD_HISTORY, JSON.stringify(rewards));
+        if (chart){
+          const idx = rewards.length;
+          chart.data.labels.push(idx);
+          chart.data.datasets[0].data.push(r);
+          if (chart.data.labels.length > MAX_POINTS){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+          chart.update();
+        }
+        renderTopline(episode, rewards, steps, epsilon);
+      },
+      addStepsLastRun(s){
+        steps.push(Number(s));
+        if (steps.length > MAX_POINTS) steps.splice(0, steps.length - MAX_POINTS);
+        localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(steps));
+        renderTopline(episode, rewards, steps, epsilon);
+      },
+      log(msg){
+        const ts = new Date().toLocaleTimeString();
+        const div = document.createElement("div");
+        div.className = "rl-log-line";
+        div.textContent = `[${ts}] ${msg}`;
+        logEl.appendChild(div);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    };
+
+    // expose immediately so app.js can use it
+    window.__WarehouseUI = api;
+
+    // first paint + self-test line so you SEE activity
+    renderTopline(episode, rewards, steps, epsilon);
+    api.log("RL UI initialized.");
+  })();
+  </script>
+
+  <!-- Only your app.js now; no training_ui.js file needed -->
   <script src="app.js" defer></script>
 </body>
 </html>

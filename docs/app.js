@@ -21,14 +21,14 @@ const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
 // ===================== RL UI (optional) =====================
-const ui = window.__WarehouseUI || (window.WarehouseTrainingUI ? new window.WarehouseTrainingUI() : null);
+const ui = window.__WarehouseUI || null;
 
 // Helpers to guard UI calls
-function uiLog(msg){ if (ui) ui.log(msg); }
-function uiSetEpisode(n){ if (ui) ui.setEpisode(n); }
-function uiSetEpsilon(e){ if (ui) ui.setEpsilon(e); }
-function uiSetSteps(s){ if (ui) ui.setLastSteps(s); }
-function uiRecordReward(r){ if (ui) ui.recordEpisodeReward(r); }
+function uiLog(msg){ if (ui && ui.log) ui.log(msg); }
+function uiSetEpisode(n){ if (ui && ui.setEpisode) ui.setEpisode(n); }
+function uiSetEpsilon(e){ if (ui && ui.setEpsilon) ui.setEpsilon(e); }
+function uiSetSteps(s){ if (ui && ui.setLastSteps) ui.setLastSteps(s); }
+function uiRecordReward(r){ if (ui && ui.recordEpisodeReward) ui.recordEpisodeReward(r); }
 
 // Epsilon pulls from UI persistence if present
 let epsilon = ui ? (ui.epsilon ?? EPS_START) : EPS_START;
