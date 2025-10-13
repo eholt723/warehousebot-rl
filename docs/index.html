@@ -10,7 +10,7 @@
     /* Hide any leftover map controls if older HTML is around */
     #mapSelect, #loadMapBtn, #mapStatus { display: none !important; }
 
-    /* Simple instructions in the upper-left */
+    /* Simple instructions in the upper-left (desktop/tablet only) */
     #instructions {
       position: absolute;
       top: 12px;
@@ -26,58 +26,65 @@
     }
     #instructions h3 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; color: #b9c3ff; }
     #instructions ol { margin: 0; padding-left: 18px; }
+
+    /* Hide desktop instructions on phones (the mobile intro replaces it) */
+    @media (max-width: 768px) {
+      #instructions { display: none; }
+    }
   </style>
 </head>
 
 <body>
+  <!-- Desktop/tablet quick start -->
   <div id="instructions" aria-label="How to use">
     <h3>Quick Start:</h3>
     <ol>
-      <li>Select items for the shipment (A-J)</li>
+      <li>Select items for the shipment (A–J)</li>
       <li>Click <strong>Update Shipment</strong>.</li>
       <li>Click <strong>Start Simulation</strong>.</li>
       <li>Keep your eye on the Blue Bot.</li>
     </ol>
   </div>
-  <!-- Mobile Intro (tap anywhere) -->
-<div id="mobileIntro" hidden>
-  <div class="mi-card" role="dialog" aria-label="Quick Start - Tap to continue">
-    <h3>Quick Start</h3>
-    <ol>
-      <li>Select items (A–J)</li>
-      <li>Tap <strong>Update Shipment</strong></li>
-      <li>Tap <strong>Start Simulation</strong></li>
-      <li>Keep your eye on the Blue Bot.</li>
-    </ol>
-    <p class="mi-hint">Tap anywhere to continue</p>
+
+  <!-- ===== Mobile Intro (tap anywhere) ===== -->
+  <div id="mobileIntro" hidden>
+    <div class="mi-card" role="dialog" aria-label="Quick Start - Tap to continue">
+      <h3>Quick Start</h3>
+      <ol>
+        <li>Select items (A–J)</li>
+        <li>Tap <strong>Update Shipment</strong></li>
+        <li>Tap <strong>Start Simulation</strong></li>
+        <li>Keep your eye on the Blue Bot.</li>
+      </ol>
+      <p class="mi-hint">Tap anywhere to continue</p>
+    </div>
   </div>
-</div>
 
-<!-- Mobile Setup (item picker + start) -->
-<div id="mobileSetup" hidden>
-  <div class="ms-card" role="dialog" aria-label="Setup Shipment">
-    <h3>Set up your shipment</h3>
+  <!-- ===== Mobile Setup (item picker + start) ===== -->
+  <div id="mobileSetup" hidden>
+    <div class="ms-card" role="dialog" aria-label="Setup Shipment">
+      <h3>Set up your shipment</h3>
 
-    <div class="ms-toolbar">
-      <div class="ms-actions">
-        <button id="mSelectAllBtn" type="button">Select All</button>
-        <button id="mClearAllBtn" type="button">Clear</button>
-        <button id="mSubmitItems" type="button" class="primary">Update Shipment</button>
+      <div class="ms-toolbar">
+        <div class="ms-actions">
+          <button id="mSelectAllBtn" type="button">Select All</button>
+          <button id="mClearAllBtn" type="button">Clear</button>
+          <button id="mSubmitItems" type="button" class="primary">Update Shipment</button>
+        </div>
+      </div>
+
+      <div class="item-buttons" id="mobileItemButtons"><!-- built by app.js --></div>
+
+      <div class="ms-footer">
+        <button id="mStartBtn" type="button" class="primary">Start Simulation</button>
       </div>
     </div>
-
-    <div class="item-buttons" id="mobileItemButtons"><!-- built by JS --></div>
-
-    <div class="ms-footer">
-      <button id="mStartBtn" type="button" class="primary">Start Simulation</button>
-    </div>
   </div>
-</div>
-
 
   <main>
     <h1>WarehouseBot-RL — Autonomous Picking Simulation</h1>
 
+    <!-- Desktop/tablet shipment toolbar -->
     <section class="shipment-input">
       <div class="shipment-toolbar">
         <div class="selector-actions">
@@ -86,7 +93,7 @@
           <button id="submitItems" type="button" class="primary">Update Shipment</button>
         </div>
 
-        <div class="item-buttons" id="itemButtons"><!-- buttons added by JS --></div>
+        <div class="item-buttons" id="itemButtons"><!-- buttons added by app.js --></div>
       </div>
     </section>
 
@@ -99,17 +106,14 @@
     <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
   </main>
 
-  <!-- === RL Telemetry: compact panel, right side ABOVE legend === -->
+  <!-- === RL Telemetry === -->
   <section id="rl-ui" class="rl-card rl-fixed">
     <header class="rl-card-header">
       <h3>RL Training</h3>
     </header>
 
     <div id="rl-body" class="rl-card-body">
-      <!-- Top row: PERSISTED metrics -->
       <div id="rl-topline" class="rl-topline"></div>
-
-      <!-- Session-only console (clears on refresh) -->
       <div id="rl-log-stream" class="rl-log-stream" aria-live="polite"></div>
     </div>
   </section>
@@ -142,7 +146,8 @@
     const logEl   = document.getElementById("rl-log-stream");
 
     function loadArray(key){
-      try{ const raw = localStorage.getItem(key);
+      try{
+        const raw = localStorage.getItem(key);
         if(!raw) return [];
         const a = JSON.parse(raw);
         return Array.isArray(a) ? a.map(Number).slice(-MAX_POINTS) : [];
@@ -174,8 +179,7 @@
         "Steps per run: " + trend + "\n" +
         "Epsilon: " + epsStr;
 
-      text = text.replace(/\u2192|→/g, ", ");
-      topline.textContent = text;
+      topline.textContent = text.replace(/\u2192|→/g, ", ");
     }
 
     function note(text){
@@ -197,6 +201,11 @@
     let steps   = loadArray(LS.STEPS_HISTORY);
 
     function place(){
+      // Skip desktop positioning while mobile-running; CSS handles it
+      if (document.body.classList.contains('mobile-running') &&
+          window.matchMedia('(max-width: 768px)').matches) {
+        return;
+      }
       const legend = document.getElementById("legend");
       const h = legend ? legend.getBoundingClientRect().height : 160;
       panel.style.position = "fixed";
@@ -241,7 +250,7 @@
   })();
   </script>
 
-  <!-- Your main app -->
+  <!-- Main app (contains mobile flow: intro -> setup -> run) -->
   <script src="app.js?v=20251013" defer></script>
 
   <footer id="signature">Created by Eric Holt</footer>
