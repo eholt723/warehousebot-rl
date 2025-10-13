@@ -26,23 +26,6 @@
     }
     #instructions h3 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; color: #b9c3ff; }
     #instructions ol { margin: 0; padding-left: 18px; }
-
-    /* NEW: compact status row under the title */
-    .status-row {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin: 6px 0 10px;
-      padding: 8px 10px;
-      background: rgba(16,22,51,0.7);
-      border: 1px solid #20285a;
-      border-radius: 8px;
-      color: #e9ecff;
-      font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    }
-    #globalStats { opacity: 0.95; }
-    #episodeLabel { color: #aab0e5; }
   </style>
 </head>
 
@@ -59,12 +42,6 @@
 
   <main>
     <h1>WarehouseBot-RL — Autonomous Picking Simulation</h1>
-
-    <!-- NEW: status row for global + per-device labels -->
-    <div class="status-row">
-      <span id="globalStats">Global — Episode: — | Avg Reward: — | Steps (last 3): — | Epsilon: —</span>
-      <span id="episodeLabel" aria-live="polite"></span>
-    </div>
 
     <section class="shipment-input">
       <div class="shipment-toolbar">
@@ -113,7 +90,7 @@
     <div class="row"><span class="k dock"></span> Docking station</div>
   </aside>
 
-  <!-- Inline UI bootstrap so it's guaranteed to exist before app.js -->
+  <!-- Inline RL UI bootstrap -->
   <script>
   (function () {
     const LS = {
@@ -145,11 +122,9 @@
       const s = steps.slice(-3);
       const improving = s.length===3 && s[0]>s[1] && s[1]>s[2];
 
-      // 🔧 Use commas instead of arrows
       const trend = s.length ? s.join(", ") + (improving ? " (improving)" : "") : "—";
       const epsStr = Number.isFinite(eps)? eps.toFixed(2) : "1.00";
 
-      // Make it red + multiline
       topline.style.color = "#ff4d4d";
       topline.style.whiteSpace = "pre-wrap";
       topline.style.fontFamily = 'Consolas, "Courier New", ui-monospace, Menlo, monospace';
@@ -181,13 +156,11 @@
       return;
     }
 
-    // persistent state
     let episode = parseInt(localStorage.getItem(LS.EPISODE) || "0", 10);
     let epsilon = parseFloat(localStorage.getItem(LS.EPSILON) || "1.0");
     let rewards = loadArray(LS.REWARD_HISTORY);
     let steps   = loadArray(LS.STEPS_HISTORY);
 
-    // place panel above legend
     function place(){
       const legend = document.getElementById("legend");
       const h = legend ? legend.getBoundingClientRect().height : 160;
@@ -201,12 +174,10 @@
     }
     place(); window.addEventListener("resize", place);
 
-    // public API used by app.js
     const api = {
-      setEpisode(n){ episode = n; try{localStorage.setItem(LS.EPISODE, String(n));}catch{} renderTopline(episode, rewards, steps, epsilon);
-        const lbl = document.getElementById("episodeLabel"); if (lbl) lbl.textContent = `Episode (this device): ${n}`; },
+      setEpisode(n){ episode = n; try{localStorage.setItem(LS.EPISODE, String(n));}catch{} renderTopline(episode, rewards, steps, epsilon); },
       setEpsilon(eps){ epsilon = eps; try{localStorage.setItem(LS.EPSILON, String(eps));}catch{} renderTopline(episode, rewards, steps, epsilon); },
-      setLastSteps(_s){ /* no-op for topline */ },
+      setLastSteps(_s){},
       recordEpisodeReward(r){
         rewards.push(Number(r));
         if (rewards.length > MAX_POINTS) rewards.splice(0, rewards.length - MAX_POINTS);
@@ -230,17 +201,14 @@
     };
 
     window.__WarehouseUI = api;
-
-    // first paint + self-test
     renderTopline(episode, rewards, steps, epsilon);
     api.log("RL UI initialized.");
   })();
   </script>
 
-  <!-- Only your app.js now -->
+  <!-- Your main app -->
   <script src="app.js?v=20251013" defer></script>
 
-  <!-- Bottom-left signature -->
   <footer id="signature">Created by Eric Holt</footer>
 </body>
 </html>

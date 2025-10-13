@@ -21,10 +21,10 @@ const REPO  = "warehousebot-rl";
 const BRANCH = "main";
 const STATS_PATH = "stats.json"; // or "docs/stats.json" if you serve from /docs
 
-// 👇 Use your Cloudflare Worker for shared stats
+// Use your Cloudflare Worker for shared stats
 const BACKEND_BASE = "https://wbrl-stats.eholt0723.workers.dev"; // set to "" to disable
 
-// Helper: raw URL for current stats.json (fallback if BACKEND_BASE is unset)
+// Helper: raw URL fallback (only used if BACKEND_BASE is empty)
 const RAW_STATS_URL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${STATS_PATH}`;
 
 // ===================== DOM =====================
@@ -38,16 +38,12 @@ const startBtn     = document.getElementById("startBtn");
 const resetBtn     = document.getElementById("resetBtn");
 const statsEl      = document.getElementById("stats");
 
-// Optional global stats UI elements (add these to HTML if you want to show repo totals)
-const globalStatsEl  = document.getElementById("globalStats");   // e.g., a small card/line for totals
-const episodeLabelEl = document.getElementById("episodeLabel");  // optional label area
-
 // ===================== RL UI (optional) =====================
 const ui = window.__WarehouseUI || null;
 
 // Helpers to guard UI calls
 function uiLog(msg){ if (ui && ui.log) ui.log(msg); }
-function uiSetEpisode(n){ if (ui && ui.setEpisode) ui.setEpisode(n); if (episodeLabelEl) episodeLabelEl.textContent = `Episode (this device): ${n}`; }
+function uiSetEpisode(n){ if (ui && ui.setEpisode) ui.setEpisode(n); }
 function uiSetEpsilon(e){ if (ui && ui.setEpsilon) ui.setEpsilon(e); }
 function uiSetSteps(s){ if (ui && ui.setLastSteps) ui.setLastSteps(s); }
 function uiRecordReward(r){ if (ui && ui.recordEpisodeReward) ui.recordEpisodeReward(r); }
@@ -62,15 +58,12 @@ let nextEpisodeNumber = (() => {
   return Number.isFinite(n) ? n : 0;
 })();
 
-// ===================== Repo-backed Global Stats =====================
+// ===================== Shared Stats (quiet sync to RL panel) =====================
 async function fetchStats() {
   try {
-    // Prefer live Worker stats; fallback to GitHub file if BACKEND_BASE is empty
-    const url = BACKEND_BASE
-      ? `${BACKEND_BASE}/api/stats`
-      : `${RAW_STATS_URL}?t=${Date.now()}`;
+    const url = BACKEND_BASE ? `${BACKEND_BASE}/api/stats` : `${RAW_STATS_URL}?t=${Date.now()}`;
     const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) throw new Error(`HTTP ${r.status} on ${url}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
   } catch (e) {
     console.warn("fetchStats failed:", e);
@@ -78,17 +71,25 @@ async function fetchStats() {
   }
 }
 
-function renderGlobalStats(data) {
-  if (!globalStatsEl || !data) return;
-  const stepsList = Array.isArray(data.runs) ? data.runs.slice(-3).map(r => r.steps).join(", ") : "—";
-  const avg = (typeof data.average_reward === "number") ? data.average_reward.toFixed(2) : "—";
-  const eps = (typeof data.epsilon === "number") ? data.epsilon.toFixed(2) : "—";
-  globalStatsEl.textContent = `Global — Episode: ${data.episodes ?? "—"} | Avg Reward: ${avg} | Steps (last 3): ${stepsList} | Epsilon: ${eps}`;
-}
-
-async function refreshGlobalStats() {
+/**
+ * Quietly updates the RL panel using backend stats (no extra UI elements).
+ * We only set Episode and Epsilon to reflect the shared totals so all devices
+ * show the same running count. Rewards/steps stay device-local.
+ */
+async function syncToplineFromBackend() {
   const s = await fetchStats();
-  renderGlobalStats(s);
+  if (!s) return;
+  if (typeof s.episodes === "number") {
+    // Update RL panel + persist so this device shows the shared total
+    uiSetEpisode(s.episodes);
+    try { localStorage.setItem(LS_KEYS.EPISODE, String(s.episodes)); } catch {}
+    nextEpisodeNumber = s.episodes; // keep internal counter in sync
+  }
+  if (typeof s.epsilon === "number") {
+    uiSetEpsilon(s.epsilon);
+    try { localStorage.setItem(LS_KEYS.EPSILON, String(s.epsilon)); } catch {}
+    epsilon = s.epsilon;
+  }
 }
 
 async function reportEpisodeSummary({ reward, steps, epsilon }) {
@@ -102,7 +103,7 @@ async function reportEpisodeSummary({ reward, steps, epsilon }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reward, steps, epsilon })
     });
-    const text = await r.text(); // read once for better error logs
+    const text = await r.text();
     if (!r.ok) throw new Error(`report failed: ${r.status} ${text}`);
     try { console.log("✅ Worker updated:", JSON.parse(text)); } catch { console.log("✅ Worker updated:", text); }
   } catch (e) {
@@ -130,11 +131,8 @@ let episodeReward = 0;
   resetSim();
   uiLog("Initialized simulation.");
 
-  // Show existing global totals on load
-  refreshGlobalStats();
-
-  // Optional: light polling to reflect other viewers’ runs (every 20s)
-  // setInterval(refreshGlobalStats, 20000);
+  // Quietly align RL topline with backend totals on load
+  await syncToplineFromBackend();
 })();
 
 // ===================== Layout loading =====================
@@ -213,7 +211,7 @@ function attachControlHandlers(){
     state.picked = [];
     state.pathLen = 0;
     state.time = 0;
-    state.safetyPauseTicks = 0; // <-- track safety pause time in ticks
+    state.safetyPauseTicks = 0; // track safety pause time in ticks
     state.delivered = false;
     state.phase = "picking";
     currentPath = [];
@@ -254,7 +252,7 @@ function resetSim(){
     people: spawnPeople(layout.people?.count ?? DEFAULT_PEOPLE),
     time: 0,
     pathLen: 0,
-    safetyPauseTicks: 0,    // <-- initialize safety pause counter
+    safetyPauseTicks: 0,
     delivered: true,        // nothing to deliver until items are picked
     phase: "idle"
   };
@@ -315,18 +313,16 @@ function run(){
       uiRecordReward(episodeReward);
       uiLog(`Episode ${episodeNumber} finished | reward=${episodeReward.toFixed(2)} | steps=${state.pathLen} | time=${state.time} | safetyPause=${pauseSec}s`);
 
-      // Epsilon decay & persist (also update LS directly so next load seeds correctly)
+      // Epsilon decay & persist
       epsilon = Math.max(EPS_MIN, epsilon * EPS_DECAY);
       uiSetEpsilon(epsilon);
       try { localStorage.setItem(LS_KEYS.EPSILON, String(epsilon)); } catch {}
-
-      // Persist the latest episode number as well
       try { localStorage.setItem(LS_KEYS.EPISODE, String(episodeNumber)); } catch {}
 
-      // ---- Report to backend + refresh global stats ----
+      // Report to backend + then sync RL topline from backend totals
       (async () => {
         await reportEpisodeSummary({ reward: episodeReward, steps: state.pathLen, epsilon });
-        await refreshGlobalStats();
+        await syncToplineFromBackend();
       })();
 
       return;
@@ -362,7 +358,7 @@ function run(){
       if (humanBufferBlocks(stepR, stepC)) {
         waitTicks++;
         state.time += 1;
-        state.safetyPauseTicks += 1;   // <-- count this safety wait tick
+        state.safetyPauseTicks += 1;
 
         // Reward: penalize waiting lightly
         episodeReward -= 0.5;
