@@ -196,7 +196,7 @@ canvas {
   z-index: 501; /* above canvas */
 }
 
-/* single-line saved metrics */
+/* single-line saved metrics (script overrides these at runtime if needed) */
 .rl-topline {
   font-size: .92rem;
   color: #e9ecff;
@@ -241,12 +241,13 @@ canvas {
   color: #91a6ff; /* subtle hover accent matching your theme */
 }
 
-/* Compact horizontal toolbar for item selection + actions */
+/* ===== Compact horizontal toolbar (actions left, A–J right) ===== */
 .shipment-input { padding: 8px; margin: 8px 0; }
 
 .shipment-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between; /* left/right split */
   gap: 12px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -254,35 +255,36 @@ canvas {
   padding: 10px 12px;
 }
 
-/* A–J buttons: one single horizontal row, scrollable if needed on smaller screens */
-.shipment-toolbar .item-buttons {
+/* Left cluster: actions */
+.selector-actions {
   display: flex;
   gap: 8px;
-  flex: 1 1 auto;
-  flex-wrap: nowrap;          /* keep on one line */
-  overflow-x: auto;           /* no vertical growth; allow sideways scroll if narrow */
-  padding-bottom: 2px;        /* avoid scrollbar overlapping buttons on some OSes */
+  flex: 0 0 auto; /* fixed width cluster */
 }
 
-/* Make the chips a tad tighter so all 10 fit comfortably with the actions */
+/* Right cluster: A–J, aligned to the right and scrolls horizontally if needed */
+.shipment-toolbar .item-buttons {
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: flex-end; /* push A–J to the right */
+  gap: 8px;
+  flex-wrap: nowrap;         /* keep on one line */
+  overflow-x: auto;          /* allow sideways scroll on small screens */
+  padding-bottom: 2px;       /* avoid scrollbar overlap */
+}
+
+/* Slightly smaller buttons so all 10 fit with actions */
 .item-btn {
   width: 36px;
   height: 36px;
   font-size: 16px;
 }
 
-/* Actions cluster pinned to the right */
-.selector-actions {
-  display: flex;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-/* Slight emphasis for the primary action */
+/* Primary button subtle emphasis */
 .selector-actions .primary {
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.05);
 }
 
-/* Optional: tighten global spacing a bit to keep the whole page above the fold */
+/* Tighten page spacing to keep everything above the fold */
 .controls { margin: 8px 0; padding: 8px 12px; }
 canvas { margin-top: 8px; }
