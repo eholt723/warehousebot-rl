@@ -118,12 +118,15 @@
       const win = rewards.slice(-AVG_WINDOW);
       const avg = win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
       const avgStr = (avg>=0?"+":"")+avg.toFixed(1);
+
       const s = steps.slice(-3);
       const improving = s.length===3 && s[0]>s[1] && s[1]>s[2];
-      const trend = s.length ? s.join(" \u2192 ")+(improving?" (improving)":"") : "—";
+
+      // 🔧 Use commas instead of arrows
+      const trend = s.length ? s.join(", ") + (improving ? " (improving)" : "") : "—";
       const epsStr = Number.isFinite(eps)? eps.toFixed(2) : "1.00";
 
-      // Multi-line & red (override CSS)
+      // Make it red + multiline
       topline.style.color = "#ff4d4d";
       topline.style.whiteSpace = "pre-wrap";
       topline.style.fontFamily = 'Consolas, "Courier New", ui-monospace, Menlo, monospace';
@@ -132,12 +135,18 @@
       topline.style.background = "transparent";
       topline.style.padding = "0";
 
-      topline.textContent =
+      // Build text
+      let text =
         "Episode: " + ep + "\n" +
         "Avg Reward: " + avgStr + "\n" +
         "Steps per run: " + trend + "\n" +
         "Epsilon: " + epsStr;
+
+      // 🛡️ Belt-and-suspenders: replace any arrows that slipped in
+      text = text.replace(/\u2192|→/g, ", ");
+      topline.textContent = text;
     }
+
 
     function note(text){
       const div = document.createElement("div");
