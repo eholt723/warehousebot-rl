@@ -358,3 +358,28 @@ canvas { margin-top: 8px; }
   #rl-ui .rl-card-body { padding: 8px 10px; }
   #rl-log-stream { display: none !important; }
 }
+
+/* === Mobile scroll fix for RL panel overlap === */
+@media (max-width: 768px) {
+  /* Allow the whole viewport to scroll when RL panel is visible */
+  body.mobile-running {
+    overflow-y: auto !important;
+    height: auto !important;
+  }
+
+  /* Give enough space at the bottom so legend isn't hidden */
+  body.mobile-running::after {
+    content: "";
+    display: block;
+    height: 140px;  /* adjust this if legend is still partly hidden */
+  }
+
+  /* Keep RL panel visually pinned near bottom but not blocking scroll */
+  body.mobile-running #rl-ui {
+    position: sticky !important;
+    bottom: 8px !important;
+    left: 8px !important;
+    right: 8px !important;
+    z-index: 501;
+  }
+}
