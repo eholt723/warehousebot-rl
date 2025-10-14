@@ -5,33 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>WarehouseBot-RL</title>
 
-  <!-- ✅ correct file name -->
   <link rel="stylesheet" href="styles.css" />
 
-  <!-- Mobile-only tweaks (small, safe overrides) -->
+  <!-- Mobile + desktop layout tweaks -->
   <style>
-    @media (max-width: 768px) {
-      /* make the map less tall on phones */
-      #stage {
-        width: 100%;
-        height: 420px;         /* ~fits nicely on most phones */
-        max-height: 55vh;      /* never exceed 55% of viewport height */
-        display: block;
-        margin: 8px auto 0;
-      }
-      /* put RL panel directly under the canvas and hide log console */
-      #rl-ui {
-        position: static !important;
-        right: auto !important;
-        bottom: auto !important;
-        width: auto;
-        max-width: none;
-        margin: 8px 0 0 0;
-      }
-      #rl-ui .rl-card-body { padding: 8px 10px; }
-      #rl-log-stream { display: none !important; }
-    }
-    /* ===== Desktop Quick Start position ===== */
+    /* ===== Desktop Quick Start position (visible only on desktop) ===== */
     #instructions {
       position: absolute;
       top: 12px;
@@ -45,30 +23,47 @@
       max-width: 320px;
       z-index: 10;
     }
+    #instructions h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #b9c3ff; }
+    #instructions ol { margin: 0; padding-left: 18px; }
 
-    #instructions h3 {
-      margin: 0 0 6px 0;
-      font-size: 14px;
-      font-weight: 600;
-      color: #b9c3ff;
-    }
-
-    #instructions ol {
-      margin: 0;
-      padding-left: 18px;
-    }
-
-    /* hide desktop instructions on phones */
+    /* ===== Mobile-only adjustments ===== */
     @media (max-width: 768px) {
-      #instructions {
-        display: none !important;
+      /* Hide the huge title to free space on phones */
+      main > h1 { display: none !important; }
+
+      /* Hide desktop instructions bubble on phones */
+      #instructions { display: none !important; }
+
+      /* Canvas: shorter and responsive */
+      #stage {
+        width: 100%;
+        height: 420px;       /* nice fit on most phones */
+        max-height: 55vh;    /* never exceed 55% of viewport */
+        display: block;
+        margin: 8px auto 0;
       }
+
+      /* RL panel: compact block directly under the canvas */
+      #rl-ui {
+        position: static !important;
+        right: auto !important;
+        bottom: auto !important;
+        width: auto;
+        max-width: none;
+        margin: 8px 0 0 0;   /* butted right under the map */
+      }
+      #rl-ui .rl-card-body { padding: 8px 10px; }
+      #rl-ui h3 { font-size: 16px; margin: 0 0 6px; }
+      .rl-topline { font-size: 14px; line-height: 1.35; }
+
+      /* Hide the verbose console on phones */
+      #rl-log-stream { display: none !important; }
     }
   </style>
 </head>
 
 <body>
-  <!-- Quick Start bubble (desktop) -->
+  <!-- Quick Start bubble (desktop only) -->
   <div id="instructions" aria-label="How to use">
     <h3>Quick Start:</h3>
     <ol>
@@ -117,7 +112,7 @@
   <main>
     <h1>WarehouseBot-RL — Autonomous Picking Simulation</h1>
 
-    <!-- Desktop toolbar (hidden by mobile flow) -->
+    <!-- Desktop toolbar (mobile flow hides these) -->
     <section class="shipment-input">
       <div class="shipment-toolbar">
         <div class="selector-actions">
@@ -138,7 +133,7 @@
     <!-- Map -->
     <canvas id="stage" width="960" height="600" aria-label="Warehouse grid"></canvas>
 
-    <!-- RL panel (desktop: fixed; mobile: sits under map) -->
+    <!-- RL panel (desktop fixed; mobile flows under map) -->
     <section id="rl-ui" class="rl-card rl-fixed">
       <header class="rl-card-header">
         <h3>RL Training</h3>
@@ -161,7 +156,7 @@
     <div class="row"><span class="k dock"></span> Docking station</div>
   </aside>
 
-  <!-- RL UI bootstrap (unchanged, just fixes desktop positioning) -->
+  <!-- RL UI bootstrap -->
   <script>
     (function () {
       const panel   = document.getElementById("rl-ui");
@@ -177,19 +172,27 @@
       const AVG_WINDOW = 100, MAX_POINTS = 1000;
 
       function loadArray(key){
-        try{ const raw = localStorage.getItem(key);
+        try{
+          const raw = localStorage.getItem(key);
           if(!raw) return [];
           const a = JSON.parse(raw);
           return Array.isArray(a) ? a.map(Number).slice(-MAX_POINTS) : [];
         }catch{ return []; }
       }
 
-      function renderTopline(ep, rewards, steps, eps){
-        const win = rewards.slice(-AVG_WINDOW);
+      // ---- persistent UI state (kept in sync as app.js updates) ----
+      let episode = parseInt(localStorage.getItem(LS.EPISODE) || "0", 10);
+      let epsilon = parseFloat(localStorage.getItem(LS.EPSILON) || "1.0");
+      let rewards = loadArray(LS.REWARD_HISTORY);
+      let steps   = loadArray(LS.STEPS_HISTORY);
+
+      function renderTopline(ep, rewardsArr, stepsArr, eps){
+        // avg reward over last N episodes on THIS device (by design)
+        const win = rewardsArr.slice(-AVG_WINDOW);
         const avg = win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
         const avgStr = (avg>=0?"+":"")+avg.toFixed(1);
 
-        const s = steps.slice(-3);
+        const s = stepsArr.slice(-3);
         const improving = s.length===3 && s[0]>s[1] && s[1]>s[2];
         const trend = s.length ? s.join(", ") + (improving ? " (improving)" : "") : "—";
         const epsStr = Number.isFinite(eps)? eps.toFixed(2) : "1.00";
@@ -226,28 +229,49 @@
       }
       place(); window.addEventListener("resize", place);
 
-      // expose API used by app.js
+      // Expose UI API for app.js (keeps local state in sync)
       const api = {
-        setEpisode(n){ try{localStorage.setItem(LS.EPISODE, String(n));}catch{} renderTopline(n, rewards, steps, epsilon); },
-        setEpsilon(eps){ try{localStorage.setItem(LS.EPSILON, String(eps));}catch{} renderTopline(episode, rewards, steps, eps); },
+        setEpisode(n){
+          episode = n;
+          try{ localStorage.setItem(LS.EPISODE, String(n)); }catch{}
+          renderTopline(episode, rewards, steps, epsilon);
+        },
+        setEpsilon(eps){
+          epsilon = eps;
+          try{ localStorage.setItem(LS.EPSILON, String(eps)); }catch{}
+          renderTopline(episode, rewards, steps, epsilon);
+        },
         setLastSteps(){},
-        recordEpisodeReward(r){ rewards.push(Number(r)); if (rewards.length>MAX_POINTS) rewards.splice(0,rewards.length-MAX_POINTS); try{localStorage.setItem(LS.REWARD_HISTORY, JSON.stringify(rewards));}catch{} renderTopline(episode, rewards, steps, epsilon); },
-        addStepsLastRun(s){ steps.push(Number(s)); if (steps.length>MAX_POINTS) steps.splice(0,steps.length-MAX_POINTS); try{localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(steps));}catch{} renderTopline(episode, rewards, steps, epsilon); },
-        log(msg){ const ts=new Date().toLocaleTimeString(); const div=document.createElement("div"); div.className="rl-log-line"; div.textContent=`[${ts}] ${msg}`; logEl.appendChild(div); logEl.scrollTop = logEl.scrollHeight; }
+        recordEpisodeReward(r){
+          rewards.push(Number(r));
+          if (rewards.length > MAX_POINTS) rewards.splice(0, rewards.length - MAX_POINTS);
+          try{ localStorage.setItem(LS.REWARD_HISTORY, JSON.stringify(rewards)); }catch{}
+          renderTopline(episode, rewards, steps, epsilon);
+        },
+        addStepsLastRun(s){
+          steps.push(Number(s));
+          if (steps.length > MAX_POINTS) steps.splice(0, steps.length - MAX_POINTS);
+          try{ localStorage.setItem(LS.STEPS_HISTORY, JSON.stringify(steps)); }catch{}
+          renderTopline(episode, rewards, steps, epsilon);
+        },
+        log(msg){
+          const ts = new Date().toLocaleTimeString();
+          const div = document.createElement("div");
+          div.className = "rl-log-line";
+          div.textContent = `[${ts}] ${msg}`;
+          logEl.appendChild(div);
+          logEl.scrollTop = logEl.scrollHeight;
+        }
       };
       window.__WarehouseUI = api;
 
       // initial paint
-      let episode = parseInt(localStorage.getItem(LS.EPISODE) || "0", 10);
-      let epsilon = parseFloat(localStorage.getItem(LS.EPSILON) || "1.0");
-      let rewards = loadArray(LS.REWARD_HISTORY);
-      let steps   = loadArray(LS.STEPS_HISTORY);
       renderTopline(episode, rewards, steps, epsilon);
       api.log("RL UI initialized.");
     })();
   </script>
 
-  <!-- Your simulation code -->
+  <!-- App -->
   <script src="app.js" defer></script>
 
   <!-- Signature -->
