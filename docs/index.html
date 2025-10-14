@@ -180,14 +180,13 @@
         }catch{ return []; }
       }
 
-      // ---- persistent UI state (kept in sync as app.js updates) ----
+      // persistent UI state
       let episode = parseInt(localStorage.getItem(LS.EPISODE) || "0", 10);
       let epsilon = parseFloat(localStorage.getItem(LS.EPSILON) || "1.0");
       let rewards = loadArray(LS.REWARD_HISTORY);
       let steps   = loadArray(LS.STEPS_HISTORY);
 
       function renderTopline(ep, rewardsArr, stepsArr, eps){
-        // avg reward over last N episodes on THIS device (by design)
         const win = rewardsArr.slice(-AVG_WINDOW);
         const avg = win.length ? (win.reduce((a,b)=>a+b,0)/win.length) : 0;
         const avgStr = (avg>=0?"+":"")+avg.toFixed(1);
