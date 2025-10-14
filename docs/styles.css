@@ -383,3 +383,45 @@ canvas { margin-top: 8px; }
     z-index: 501;
   }
 }
+
+/* === Mobile: make page scrollable, RL sticky, legend in-flow === */
+@media (max-width: 768px) {
+  /* Allow scrolling while the RL panel is up */
+  body.mobile-running {
+    overflow-y: auto !important;
+    height: auto !important;
+  }
+
+  /* Spacer so you can scroll past the sticky RL box */
+  body.mobile-running::after {
+    content: "";
+    display: block;
+    height: 220px; /* adjust if your RL panel height changes */
+  }
+
+  /* RL panel: sticky near bottom, not fixed */
+  body.mobile-running #rl-ui {
+    position: sticky !important;
+    bottom: 12px !important;
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 34vh !important;
+    z-index: 501; /* above content but below overlays */
+  }
+
+  /* Legend: remove fixed positioning so it won't be covered */
+  body.mobile-running #legend {
+    position: static !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    opacity: 1 !important;
+    z-index: auto !important;
+
+    /* Mobile-friendly sizing/spacing */
+    margin: 12px 12px 80px 12px;  /* bottom margin clears your footer */
+    width: auto;
+  }
+}
