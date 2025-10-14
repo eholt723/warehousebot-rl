@@ -424,3 +424,22 @@ canvas { margin-top: 8px; }
   #rl-log-stream { display: none !important; }
 }
 
+/* === Mobile overlap fix: RL panel vs legend === */
+@media (max-width: 768px) {
+  /* Add a little more lift to the RL panel above the legend */
+  body.mobile-running #rl-ui {
+    bottom: 72px !important;  /* was 42px — raised slightly */
+  }
+
+  /* Ensure legend sits below RL panel cleanly */
+  body.mobile-running #legend {
+    bottom: 8px !important;
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+
+  /* Add safe spacing for bottom signature */
+  #signature {
+    bottom: 8px !important;
+  }
+}
