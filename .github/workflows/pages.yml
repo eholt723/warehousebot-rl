@@ -22,14 +22,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: false
+          submodules: false     # <-- prevents the error you’re seeing
 
-      # If you build a site, add your build step here and set output to ./docs or ./dist
+      # If you have a build step (e.g., Vite), run it here and output to ./docs or ./dist
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./docs   # change to ./dist if your built site lives there
+          path: ./docs           # <-- change to ./dist if your published files live there
 
   deploy:
     needs: build
