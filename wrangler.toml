@@ -1,0 +1,12 @@
+name = "warehousebot-rl"
+main = "wbrl-stats/worker.js"
+compatibility_date = "2025-10-14"
+
+[durable_objects]
+bindings = [
+  { name = "RL_STATE", class_name = "RLState" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RLState"]
