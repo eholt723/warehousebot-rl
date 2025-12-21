@@ -215,7 +215,9 @@
 
       // desktop placement above legend; mobile uses static flow via CSS
       function place(){
-        if (window.matchMedia("(max-width: 768px)").matches) return;
+        // Do NOT fixed-position on mobile OR short-height laptop screens
+        if (window.matchMedia("(max-width: 768px), (max-height: 820px)").matches) return;
+
         const legend = document.getElementById("legend");
         const h = legend ? legend.getBoundingClientRect().height : 160;
         panel.style.position = "fixed";

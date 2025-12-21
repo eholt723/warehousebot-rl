@@ -178,6 +178,41 @@ canvas {
   .rl-fixed { position: static; width: auto; max-width: 960px; margin: 12px auto; }
 }
 
+/* ===== Short-height desktop/laptop fix ===== */
+@media (max-height: 820px) {
+  /* Let the Quick Start bubble participate in layout */
+  #instructions {
+    position: static !important;
+    margin: 0 0 10px 0;
+    max-width: 100%;
+  }
+
+  /* Stop pinning RL panel on short screens */
+  .rl-fixed {
+    position: static !important;
+    width: auto !important;
+    max-width: 960px;
+    margin: 12px auto;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Stop pinning legend; put it below content */
+  #legend {
+    position: static !important;
+    right: auto !important;
+    bottom: auto !important;
+    margin: 12px auto 0;
+    width: fit-content;
+    max-width: 320px;
+  }
+
+  /* Small bottom padding so footer doesn't collide */
+  body {
+    padding-bottom: 48px;
+  }
+}
+
 #signature {
   position: fixed;
   bottom: 16px;
