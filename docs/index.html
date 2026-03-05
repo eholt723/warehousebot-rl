@@ -127,6 +127,7 @@
     <div class="controls">
       <button id="startBtn" type="button">Start Simulation</button>
       <button id="resetBtn" type="button">Reset</button>
+      <button id="dqnBtn" type="button">DQN Mode: OFF</button>
       <span id="stats"></span>
     </div>
 
@@ -271,6 +272,9 @@
       api.log("RL UI initialized.");
     })();
   </script>
+
+  <!-- ONNX Runtime (for DQN mode) -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
 
   <!-- App -->
   <script src="app.js" defer></script>
