@@ -65,7 +65,7 @@ let nextEpisodeNumber = (() => {
 // ===================== Shared Stats (quiet sync to RL panel) =====================
 async function fetchStats() {
   try {
-    const url = BACKEND_BASE ? `${BACKEND_BASE}/api/stats` : `${RAW_STATS_URL}?t=${Date.now()}`;
+    const url = BACKEND_BASE ? `${BACKEND_BASE}/stats` : `${RAW_STATS_URL}?t=${Date.now()}`;
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
@@ -81,10 +81,10 @@ async function syncToplineFromBackend() {
   if (!s) return;
 
   // Episode / Epsilon (shared counters)
-  if (typeof s.episodes === "number") {
-    uiSetEpisode(s.episodes);
-    try { localStorage.setItem(LS_KEYS.EPISODE, String(s.episodes)); } catch {}
-    nextEpisodeNumber = s.episodes;
+  if (typeof s.episode === "number") {
+    uiSetEpisode(s.episode);
+    try { localStorage.setItem(LS_KEYS.EPISODE, String(s.episode)); } catch {}
+    nextEpisodeNumber = s.episode;
   }
   if (typeof s.epsilon === "number") {
     uiSetEpsilon(s.epsilon);
@@ -94,8 +94,8 @@ async function syncToplineFromBackend() {
 
   // Avg Reward + Steps per run (shared topline display)
   if (ui && typeof ui.setRemoteTopline === "function") {
-    const avg = (typeof s.average_reward === "number") ? s.average_reward : null;
-    const last3 = Array.isArray(s.runs) ? s.runs.slice(-3).map(r => r.steps) : [];
+    const avg = (typeof s.avgReward === "number") ? s.avgReward : null;
+    const last3 = Array.isArray(s.stepsRecent) ? s.stepsRecent.slice(-3) : [];
     ui.setRemoteTopline(avg, last3);
   }
 }
@@ -103,7 +103,7 @@ async function syncToplineFromBackend() {
 async function reportEpisodeSummary({ reward, steps, epsilon }) {
   if (!BACKEND_BASE) return;
   try {
-    const r = await fetch(`${BACKEND_BASE}/api/report`, {
+    const r = await fetch(`${BACKEND_BASE}/stats`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reward, steps, epsilon })
