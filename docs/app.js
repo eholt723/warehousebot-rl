@@ -232,8 +232,7 @@ let episodeReward = 0;
   // Quietly align RL topline with backend totals on load
   await syncToplineFromBackend();
 
-  // Load DQN model in background (non-blocking)
-  loadOnnxModel();
+  // loadOnnxModel();  // DQN disabled pending retraining
 })();
 
 // ===================== Layout loading =====================
@@ -264,7 +263,7 @@ async function loadLayout(fileName){
   }
 }
 
-// ===================== DQN Inference =====================
+/* ===================== DQN Inference (disabled — model needs retraining with shelves in obs) =====================
 // Model expects: obs flat float32 (1 x 1620), input name "obs"
 // Output: q_values (1 x 5) — argmax = action (0=Up,1=Down,2=Left,3=Right,4=Wait)
 // Training grid was 18x30. Clip layout rows to 18 when building obs.
@@ -282,16 +281,13 @@ async function loadOnnxModel() {
 
 function buildObs() {
   const flat = new Float32Array(DQN_ROWS * DQN_COLS * 3);
-  // channel 0: remaining item locations
   for (const [r, c] of state.orderCoords) {
     if (r < DQN_ROWS && c < DQN_COLS) flat[(r * DQN_COLS + c) * 3 + 0] = 1.0;
   }
-  // channel 1: people
   for (const p of state.people) {
     const [r, c] = p.pos;
     if (r < DQN_ROWS && c < DQN_COLS) flat[(r * DQN_COLS + c) * 3 + 1] = 1.0;
   }
-  // channel 2: bot
   const [br, bc] = state.bot;
   if (br < DQN_ROWS && bc < DQN_COLS) flat[(br * DQN_COLS + bc) * 3 + 2] = 1.0;
   return flat;
@@ -306,6 +302,7 @@ async function dqnStep() {
   for (let i = 1; i < 5; i++) if (qvals[i] > qvals[best]) best = i;
   return best;
 }
+===================== end DQN ===================== */
 
 // ===================== Item Buttons A–J =====================
 function buildItemSelector(itemsObj) {
@@ -397,6 +394,7 @@ function attachControlHandlers(){
     resetSim();
   });
 
+  /* DQN toggle — disabled pending retraining
   const dqnBtnEl = document.getElementById("dqnBtn");
   dqnBtnEl?.addEventListener("click", () => {
     if (!onnxSession) {
@@ -408,11 +406,13 @@ function attachControlHandlers(){
       return;
     }
     dqnMode = !dqnMode;
-    if (dqnMode) currentPath = [];  // clear A* path on switch
+    if (dqnMode) currentPath = [];
     updateDqnBtn();
   });
+  */
 }
 
+/* DQN button update — disabled pending retraining
 function updateDqnBtn() {
   const btn = document.getElementById("dqnBtn");
   if (!btn) return;
@@ -420,6 +420,7 @@ function updateDqnBtn() {
   btn.style.background = dqnMode ? "#00b3ff" : "";
   btn.style.color = dqnMode ? "#0b1020" : "";
 }
+*/
 
 // ===================== Simulation =====================
 function resetSim(){
