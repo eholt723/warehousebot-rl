@@ -11,7 +11,11 @@ export default {
     const room = url.searchParams.get("room") || "prod";
     const id = env.RL_STATE.idFromName(room);
     const obj = env.RL_STATE.get(id);
-    return obj.fetch(req, cors);
+    const res = await obj.fetch(req);
+    return new Response(res.body, {
+      status: res.status,
+      headers: { ...Object.fromEntries(res.headers), ...cors },
+    });
   },
 };
 
