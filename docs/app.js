@@ -15,17 +15,8 @@ const LS_KEYS = {
   EPSILON: "whbot_epsilon"
 };
 
-// --- Repo-backed global stats (EDIT THESE) ---
-const OWNER = "eholt723";
-const REPO  = "warehousebot-rl";
-const BRANCH = "main";
-const STATS_PATH = "stats.json"; // or "docs/stats.json" if you serve from /docs
-
 // Use your Cloudflare Worker for shared stats
 const BACKEND_BASE = "https://wbrl-stats.eholt0723.workers.dev"; // set to "" to disable
-
-// Helper: raw URL fallback (only used if BACKEND_BASE is empty)
-const RAW_STATS_URL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${STATS_PATH}`;
 
 // ===================== DOM =====================
 const canvas = document.getElementById("stage");
@@ -64,9 +55,9 @@ let nextEpisodeNumber = (() => {
 
 // ===================== Shared Stats (quiet sync to RL panel) =====================
 async function fetchStats() {
+  if (!BACKEND_BASE) return null;
   try {
-    const url = BACKEND_BASE ? `${BACKEND_BASE}/stats` : `${RAW_STATS_URL}?t=${Date.now()}`;
-    const r = await fetch(url, { cache: "no-store" });
+    const r = await fetch(`${BACKEND_BASE}/stats`, { cache: "no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
   } catch (e) {
@@ -223,6 +214,8 @@ let peopleTick = 0;        // people move half as often
 let currentPath = [];      // array of [r,c]
 let waitTicks = 0;         // consecutive waiting ticks
 let lastLayoutName = null; // avoid immediate repeat
+let dqnMode = false;
+let onnxSession = null;
 
 // Episode-scoped reward accumulator
 let episodeReward = 0;
@@ -238,6 +231,9 @@ let episodeReward = 0;
 
   // Quietly align RL topline with backend totals on load
   await syncToplineFromBackend();
+
+  // Load DQN model in background (non-blocking)
+  loadOnnxModel();
 })();
 
 // ===================== Layout loading =====================
@@ -266,6 +262,49 @@ async function loadLayout(fileName){
     alert(`Error loading ${fileName}: ${err.message}`);
     uiLog(`Error loading ${fileName}: ${err.message}`);
   }
+}
+
+// ===================== DQN Inference =====================
+// Model expects: obs flat float32 (1 x 1620), input name "obs"
+// Output: q_values (1 x 5) — argmax = action (0=Up,1=Down,2=Left,3=Right,4=Wait)
+// Training grid was 18x30. Clip layout rows to 18 when building obs.
+const DQN_ROWS = 18, DQN_COLS = 30;
+
+async function loadOnnxModel() {
+  if (typeof ort === "undefined") { console.warn("onnxruntime-web not loaded"); return; }
+  try {
+    onnxSession = await ort.InferenceSession.create("models/warehouse_dqn.onnx");
+    uiLog("DQN model ready.");
+  } catch (e) {
+    console.warn("DQN model load failed:", e);
+  }
+}
+
+function buildObs() {
+  const flat = new Float32Array(DQN_ROWS * DQN_COLS * 3);
+  // channel 0: remaining item locations
+  for (const [r, c] of state.orderCoords) {
+    if (r < DQN_ROWS && c < DQN_COLS) flat[(r * DQN_COLS + c) * 3 + 0] = 1.0;
+  }
+  // channel 1: people
+  for (const p of state.people) {
+    const [r, c] = p.pos;
+    if (r < DQN_ROWS && c < DQN_COLS) flat[(r * DQN_COLS + c) * 3 + 1] = 1.0;
+  }
+  // channel 2: bot
+  const [br, bc] = state.bot;
+  if (br < DQN_ROWS && bc < DQN_COLS) flat[(br * DQN_COLS + bc) * 3 + 2] = 1.0;
+  return flat;
+}
+
+async function dqnStep() {
+  const flat = buildObs();
+  const tensor = new ort.Tensor("float32", flat, [1, flat.length]);
+  const result = await onnxSession.run({ obs: tensor });
+  const qvals = result.q_values.data;
+  let best = 0;
+  for (let i = 1; i < 5; i++) if (qvals[i] > qvals[best]) best = i;
+  return best;
 }
 
 // ===================== Item Buttons A–J =====================
@@ -350,8 +389,36 @@ function attachControlHandlers(){
     if (isMobile) buildItemSelectorMobile(layout.items);
     // reset mobile classes so onboarding can show again if desired
     document.body.classList.remove("mobile-running");
+    // DQN mode requires 18-row layout; disable if incompatible
+    if (dqnMode && layout.rows !== DQN_ROWS) {
+      dqnMode = false;
+      updateDqnBtn();
+    }
     resetSim();
   });
+
+  const dqnBtnEl = document.getElementById("dqnBtn");
+  dqnBtnEl?.addEventListener("click", () => {
+    if (!onnxSession) {
+      alert("DQN model not loaded yet. Wait a moment and try again.");
+      return;
+    }
+    if (layout.rows !== DQN_ROWS) {
+      alert(`DQN mode requires an 18-row layout. Current layout has ${layout.rows} rows. Click Reset to try a different map.`);
+      return;
+    }
+    dqnMode = !dqnMode;
+    if (dqnMode) currentPath = [];  // clear A* path on switch
+    updateDqnBtn();
+  });
+}
+
+function updateDqnBtn() {
+  const btn = document.getElementById("dqnBtn");
+  if (!btn) return;
+  btn.textContent = `DQN Mode: ${dqnMode ? "ON" : "OFF"}`;
+  btn.style.background = dqnMode ? "#00b3ff" : "";
+  btn.style.color = dqnMode ? "#0b1020" : "";
 }
 
 // ===================== Simulation =====================
@@ -393,70 +460,90 @@ function run(){
   uiSetEpsilon(epsilon);
   uiLog(`Episode ${episodeNumber} started (epsilon=${epsilon.toFixed(2)})`);
 
-  tickTimer = setInterval(() => {
-    // 1) People move at half speed
-    peopleTick++;
-    if (peopleTick % 2 === 0) stepPeople();
+  let tickBusy = false;
+  tickTimer = setInterval(async () => {
+    if (tickBusy) return;
+    tickBusy = true;
+    try { await doTick(episodeNumber); }
+    finally { tickBusy = false; }
+  }, STEP_MS);
+}
 
-    // 2) Decide current target
-    let target = null;
-    if (state.orderCoords.length > 0) {
-      target = state.orderCoords[0];
-      state.phase = "picking";
-    } else if (!state.delivered && state.drop) {
-      target = state.drop;
-      state.phase = "drop";
-    } else {
-      target = state.dock;
-      state.phase = "return";
+async function doTick(episodeNumber) {
+  // 1) People move at half speed
+  peopleTick++;
+  if (peopleTick % 2 === 0) stepPeople();
+
+  // 2) Decide current target
+  let target = null;
+  if (state.orderCoords.length > 0) {
+    target = state.orderCoords[0];
+    state.phase = "picking";
+  } else if (!state.delivered && state.drop) {
+    target = state.drop;
+    state.phase = "drop";
+  } else {
+    target = state.dock;
+    state.phase = "return";
+  }
+
+  // 3) Done & docked
+  if (state.phase === "return" && sameCell(state.bot, state.dock) && state.delivered) {
+    clearInterval(tickTimer);
+    state.phase = "idle";
+    draw();
+    const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
+    statsEl.textContent =
+      `Docked ✅ | Time: ${state.time} | Path length: ${state.pathLen} | Safety pause time: ${pauseSec}s`;
+
+    // Reward for successful dock
+    episodeReward += 10;
+
+    // Episode end -> record metrics (local UI)
+    uiSetSteps(state.pathLen);
+    if (ui && typeof ui.addStepsLastRun === "function") ui.addStepsLastRun(state.pathLen);
+    uiRecordReward(episodeReward);
+    uiLog(`Episode ${episodeNumber} finished | reward=${episodeReward.toFixed(2)} | steps=${state.pathLen} | time=${state.time} | safetyPause=${pauseSec}s`);
+
+    // Epsilon decay & persist
+    epsilon = Math.max(EPS_MIN, epsilon * EPS_DECAY);
+    uiSetEpsilon(epsilon);
+    try { localStorage.setItem(LS_KEYS.EPSILON, String(epsilon)); } catch {}
+    try { localStorage.setItem(LS_KEYS.EPISODE, String(episodeNumber)); } catch {}
+
+    // Report to backend + then sync RL topline from backend totals
+    (async () => {
+      await reportEpisodeSummary({ reward: episodeReward, steps: state.pathLen, epsilon });
+      await syncToplineFromBackend();
+    })();
+
+    return;
+  }
+
+  // 4) Navigate
+  const [tr, tc] = target;
+  const [r,  c ] = state.bot;
+  let nr = r, nc = c;
+
+  if (dqnMode && onnxSession && state.phase !== "return") {
+    // DQN navigation: query model, apply action if valid
+    const action = await dqnStep();
+    const MOVES = [[-1,0],[1,0],[0,-1],[0,1],[0,0]];
+    const [dr, dc] = MOVES[action ?? 4];
+    const cr = r + dr, cc = c + dc;
+    if (inBounds(cr, cc) && !isBlockedByShelves(cr, cc) && !humanBufferBlocks(cr, cc)) {
+      nr = cr; nc = cc;
     }
-
-    // 3) Done & docked
-    if (state.phase === "return" && sameCell(state.bot, state.dock) && state.delivered) {
-      clearInterval(tickTimer);
-      state.phase = "idle";
-      draw();
-      const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
-      statsEl.textContent =
-        `Docked ✅ | Time: ${state.time} | Path length: ${state.pathLen} | Safety pause time: ${pauseSec}s`;
-
-      // Reward for successful dock
-      episodeReward += 10;
-
-      // Episode end -> record metrics (local UI)
-      uiSetSteps(state.pathLen);
-      if (ui && typeof ui.addStepsLastRun === "function") ui.addStepsLastRun(state.pathLen);
-      uiRecordReward(episodeReward);
-      uiLog(`Episode ${episodeNumber} finished | reward=${episodeReward.toFixed(2)} | steps=${state.pathLen} | time=${state.time} | safetyPause=${pauseSec}s`);
-
-      // Epsilon decay & persist
-      epsilon = Math.max(EPS_MIN, epsilon * EPS_DECAY);
-      uiSetEpsilon(epsilon);
-      try { localStorage.setItem(LS_KEYS.EPSILON, String(epsilon)); } catch {}
-      try { localStorage.setItem(LS_KEYS.EPISODE, String(episodeNumber)); } catch {}
-
-      // Report to backend + then sync RL topline from backend totals
-      (async () => {
-        await reportEpisodeSummary({ reward: episodeReward, steps: state.pathLen, epsilon });
-        await syncToplineFromBackend();
-      })();
-
-      return;
-    }
-
-    // 4) Plan through people (ignore them), wait if next step is human-blocked
-    const [tr, tc] = target;
-    const [r,  c ] = state.bot;
-
+    waitTicks = 0;
+  } else {
+    // A* navigation
     const targetChanged = !(currentPath.length && sameCell(currentPath.at(-1) || [-1,-1], [tr, tc]));
     let mustReplan = currentPath.length === 0 || targetChanged;
 
     // Replan if next step is shelf-blocked/out-of-bounds
     if (!mustReplan && currentPath.length > 0) {
       const [nr0, nc0] = currentPath[0];
-      if (!inBounds(nr0, nc0) || isBlockedByShelves(nr0, nc0)) {
-        mustReplan = true;
-      }
+      if (!inBounds(nr0, nc0) || isBlockedByShelves(nr0, nc0)) mustReplan = true;
     }
 
     if (mustReplan) {
@@ -464,8 +551,6 @@ function run(){
       waitTicks = 0; // reset patience on new plan
       uiLog(`Replan: (${r},${c}) -> (${tr},${tc}) | pathLen=${currentPath.length}`);
     }
-
-    let nr = r, nc = c;
 
     if (currentPath.length > 0) {
       const [stepR, stepC] = currentPath[0];
@@ -497,54 +582,79 @@ function run(){
       // Otherwise, advance one step along the planned path
       [nr, nc] = currentPath.shift();
     }
+  }
 
-    // Reward: step cost
-    if (nr !== r || nc !== c) {
-      state.pathLen += 1;
-      episodeReward -= 1;
-    }
-    state.bot = [nr, nc];
-    state.time += 1;
+  // Reward: step cost
+  if (nr !== r || nc !== c) {
+    state.pathLen += 1;
+    episodeReward -= 1;
+  }
+  state.bot = [nr, nc];
+  state.time += 1;
 
-    // 5) Arrivals
-    if (nr === tr && nc === tc) {
-      if (state.phase === "picking") {
-        const label = state.orderLabels[0];
-        state.picked.push({ coord: [tr, tc], label });
-        state.orderCoords.shift();
-        state.orderLabels.shift();
-        currentPath = [];
-        waitTicks = 0;
-
-        // Reward: picking success
-        episodeReward += 20;
-        uiLog(`Picked item ${label} at (${tr},${tc}). Items left: ${state.orderCoords.length}`);
-
-        if (state.orderCoords.length === 0) {
-          state.delivered = false;
-          uiLog("All items picked → heading to DROP.");
-        }
-      } else if (state.phase === "drop") {
-        state.delivered = true;
-        currentPath = [];
-        waitTicks = 0;
-
-        // Reward: successful drop
-        episodeReward += 30;
-        uiLog("Dropped items successfully → returning to DOCK.");
+  // 5) Arrivals
+  if (dqnMode && onnxSession && state.phase === "picking") {
+    // DQN: pick any item at current position (model may reach them out of order)
+    const idx = state.orderCoords.findIndex(([ir, ic]) => ir === nr && ic === nc);
+    if (idx >= 0) {
+      const label = state.orderLabels[idx];
+      state.picked.push({ coord: [nr, nc], label });
+      state.orderCoords.splice(idx, 1);
+      state.orderLabels.splice(idx, 1);
+      currentPath = [];
+      waitTicks = 0;
+      episodeReward += 20;
+      uiLog(`[DQN] Picked item ${label} at (${nr},${nc}). Items left: ${state.orderCoords.length}`);
+      if (state.orderCoords.length === 0) {
+        state.delivered = false;
+        uiLog("All items picked → heading to DROP.");
       }
     }
+  } else if (dqnMode && onnxSession && state.phase === "drop" && nr === tr && nc === tc) {
+    state.delivered = true;
+    currentPath = [];
+    waitTicks = 0;
+    episodeReward += 30;
+    uiLog("[DQN] Dropped items successfully → returning to DOCK.");
+  } else if (nr === tr && nc === tc) {
+    // A* arrivals
+    if (state.phase === "picking") {
+      const label = state.orderLabels[0];
+      state.picked.push({ coord: [tr, tc], label });
+      state.orderCoords.shift();
+      state.orderLabels.shift();
+      currentPath = [];
+      waitTicks = 0;
 
-    // 6) Draw + stats
-    draw();
-    const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
-    const targetsLeft =
-      state.orderCoords.length +
-      (!state.delivered ? 1 : 0) +
-      (!sameCell(state.bot, state.dock) ? 1 : 0);
-    statsEl.textContent =
-      `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Safety pause: ${pauseSec}s | Targets left: ${targetsLeft}`;
-  }, STEP_MS);
+      // Reward: picking success
+      episodeReward += 20;
+      uiLog(`Picked item ${label} at (${tr},${tc}). Items left: ${state.orderCoords.length}`);
+
+      if (state.orderCoords.length === 0) {
+        state.delivered = false;
+        uiLog("All items picked → heading to DROP.");
+      }
+    } else if (state.phase === "drop") {
+      state.delivered = true;
+      currentPath = [];
+      waitTicks = 0;
+
+      // Reward: successful drop
+      episodeReward += 30;
+      uiLog("Dropped items successfully → returning to DOCK.");
+    }
+  }
+
+  // 6) Draw + stats
+  draw();
+  const pauseSec = (state.safetyPauseTicks * STEP_MS / 1000).toFixed(1);
+  const targetsLeft =
+    state.orderCoords.length +
+    (!state.delivered ? 1 : 0) +
+    (!sameCell(state.bot, state.dock) ? 1 : 0);
+  const modeTag = dqnMode ? " | DQN" : "";
+  statsEl.textContent =
+    `Phase: ${state.phase} | Time: ${state.time} | Path: ${state.pathLen} | Safety pause: ${pauseSec}s | Targets left: ${targetsLeft}${modeTag}`;
 }
 
 // ===================== People =====================
