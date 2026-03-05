@@ -1,6 +1,17 @@
 # Dependency directories
 node_modules/
 
-# Optional: ignore build outputs and environment files too
+# Build outputs and environment files
 dist/
 .env
+
+# Claude
+CLAUDE.md
+.claude/
+
+# Wrangler local dev state
+.wrangler/
+
+# Python
+__pycache__/
+*.pyc
