@@ -4,6 +4,7 @@ node_modules/
 # Build outputs and environment files
 dist/
 .env
+.vscode/
 
 # Claude
 CLAUDE.md
