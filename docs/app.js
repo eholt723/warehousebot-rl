@@ -215,6 +215,8 @@ function attachMobileFlowHandlers(){
 
 // ===================== Global State =====================
 let layout = null;
+let blockedSet = null;  // Set<"r,c"> — precomputed from layout.obstacles
+let itemSet = null;     // Set<"r,c"> — precomputed from layout.items
 let state  = null;
 let tickTimer = null;
 let peopleTick = 0;        // people move half as often
@@ -257,6 +259,8 @@ async function loadLayout(fileName){
     const res = await fetch(`data/${fileName}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     layout = await res.json();
+    blockedSet = new Set(layout.obstacles.map(([r,c]) => `${r},${c}`));
+    itemSet = new Set(Object.values(layout.items).map(([r,c]) => `${r},${c}`));
   } catch (err) {
     console.error("Layout load error:", err);
     alert(`Error loading ${fileName}: ${err.message}`);
@@ -554,8 +558,7 @@ function spawnPeople(n){
     if (isBlockedByShelves(r,c)) continue;
 
     // Avoid item cells
-    const onItem = Object.values(layout.items).some(([ir,ic]) => ir===r && ic===c);
-    if (onItem) continue;
+    if (itemSet.has(`${r},${c}`)) continue;
 
     // Avoid dock and drop
     const [dr,dc] = layout.dock || [0,0];
@@ -575,12 +578,10 @@ function stepPeople(){
     let nr = r + dr, nc = c + dc;
 
     // Avoid shelves, items, and the bot
-    const onItem = Object.values(layout.items).some(([ir,ic]) => ir===nr && ic===nc);
-    if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem || (nr===state.bot[0] && nc===state.bot[1])) {
+    if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || itemSet.has(`${nr},${nc}`) || (nr===state.bot[0] && nc===state.bot[1])) {
       [dr, dc] = [-dr, -dc];
       nr = r + dr; nc = c + dc;
-      const onItem2 = Object.values(layout.items).some(([ir,ic]) => ir===nr && ic===nc);
-      if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || onItem2) { nr = r; nc = c; }
+      if (!inBounds(nr,nc) || isBlockedByShelves(nr,nc) || itemSet.has(`${nr},${nc}`)) { nr = r; nc = c; }
     }
     p.dir = [dr, dc];
     p.pos = [nr, nc];
@@ -588,7 +589,7 @@ function stepPeople(){
 }
 
 // ===================== Collision / Geometry =====================
-function isBlockedByShelves(r,c){ return layout.obstacles.some(([or,oc]) => or === r && oc === c); }
+function isBlockedByShelves(r,c){ return blockedSet.has(`${r},${c}`); }
 function humanBufferBlocks(r,c){
   for (const p of state.people){
     const [pr, pc] = p.pos;
@@ -668,9 +669,6 @@ function drawCircle(cx, cy, r){ ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2
 // ===================== Pathfinding =====================
 // A* that ignores people (treat people as temporary). Only shelves are hard obstacles.
 function astarStatic(start, goal) {
-  const blocked = new Set();
-  layout.obstacles.forEach(([r,c]) => blocked.add(`${r},${c}`));
-
   const key = (r,c) => `${r},${c}`;
   const open = new Map();  // key -> node
   const closed = new Set();
@@ -695,7 +693,7 @@ function astarStatic(start, goal) {
     for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
       const rr = bestN.r+dr, cc = bestN.c+dc, k = key(rr,cc);
       if (!inBounds(rr,cc)) continue;
-      if (blocked.has(k)) continue;
+      if (blockedSet.has(k)) continue;
       if (closed.has(k)) continue;
       const g = bestN.g+1, f=g+h([rr,cc],goal);
       const prev = open.get(k);
